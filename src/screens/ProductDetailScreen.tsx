@@ -1,0 +1,221 @@
+import React, { useEffect, useState } from 'react';
+import {
+  View, Text, Image, ScrollView, TouchableOpacity,
+  StyleSheet, ActivityIndicator,
+} from 'react-native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { RouteProp } from '@react-navigation/native';
+import { RootStackParamList } from '../navigation/AppNavigator';
+import { getProduct } from '../services/api';
+import { useCart } from '../hooks/useCart';
+import { useLanguage } from '../hooks/useLanguage';
+import { Ionicons } from '@expo/vector-icons';
+
+type Props = {
+  navigation: NativeStackNavigationProp<RootStackParamList, 'ProductDetail'>;
+  route: RouteProp<RootStackParamList, 'ProductDetail'>;
+};
+
+interface Product {
+  _id: string;
+  name: { en: string; mr: string } | string;
+  description: string;
+  price: number;
+  image?: string;
+  category: string;
+}
+
+export default function ProductDetailScreen({ route, navigation }: Props) {
+  const { productId } = route.params;
+  const [product, setProduct] = useState<Product | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [qty, setQty] = useState(1);
+  const [added, setAdded] = useState(false);
+  const { addToCart, clearCart } = useCart();
+  const { t, tProduct, tCategory } = useLanguage();
+
+  useEffect(() => {
+    getProduct(productId)
+      .then((res) => setProduct(res.data))
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [productId]);
+
+  const handleAdd = () => {
+    if (!product) return;
+    for (let i = 0; i < qty; i++) {
+      addToCart({ _id: product._id, name: product.name, price: product.price, image: product.image });
+    }
+    setAdded(true);
+    setTimeout(() => setAdded(false), 1500);
+  };
+
+  const handleBuyNow = () => {
+    if (!product) return;
+    clearCart();
+    addToCart({ _id: product._id, name: product.name, price: product.price, image: product.image });
+    navigation.navigate('Checkout');
+  };
+
+  if (loading) return <ActivityIndicator size="large" color="#a855f7" style={{ flex: 1, backgroundColor: '#f8fafc' }} />;
+  if (!product) return <View style={styles.container}><Text style={styles.errorText}>{t('productNotFound')}</Text></View>;
+
+  return (
+    <View style={styles.container}>
+      <ScrollView showsVerticalScrollIndicator={false}>
+        {product.image ? (
+          <Image source={{ uri: product.image }} style={styles.image} />
+        ) : (
+          <View style={styles.imagePlaceholder}>
+            <Ionicons name="cube-outline" size={72} color="#cbd5e1" />
+          </View>
+        )}
+        <View style={styles.content}>
+          <View style={styles.badgeRow}>
+            <Text style={styles.category}>{tCategory(product.category)}</Text>
+            <View style={styles.ratingBadge}>
+              <Ionicons name="star" size={12} color="#fbbf24" />
+              <Text style={styles.ratingText}>4.8 (80+ ratings)</Text>
+            </View>
+          </View>
+          <Text style={styles.name}>{tProduct(product.name)}</Text>
+          <Text style={styles.price}>
+            ₹{product.price}{' '}
+            <Text style={styles.perKg}>
+              / {(() => {
+                const cat = (product.category || '').toLowerCase();
+                if (cat.includes('veg') || cat.includes('green') || cat.includes('root') || cat.includes('herb') || cat.includes('fruit')) {
+                  return t('perKg');
+                }
+                return t('perPc');
+              })()}
+            </Text>
+          </Text>
+
+          {/* Delivery Promise */}
+          <View style={styles.deliveryBox}>
+            <Ionicons name="bicycle" size={18} color="#166534" />
+            <Text style={styles.deliveryText}>Free Delivery in 15–30 mins</Text>
+          </View>
+
+          {product.description ? (
+            <View style={styles.descContainer}>
+              <Text style={styles.descTitle}>Product Information</Text>
+              <Text style={styles.description}>{product.description}</Text>
+            </View>
+          ) : null}
+
+          <View style={styles.divider} />
+
+          {/* Guarantees */}
+          <View style={styles.guarantees}>
+            <View style={styles.guaranteeItem}>
+              <Ionicons name="shield-checkmark-outline" size={15} color="#7c3aed" />
+              <Text style={styles.guaranteeText}>100% Quality Checked</Text>
+            </View>
+            <View style={styles.guaranteeItem}>
+              <Ionicons name="refresh-outline" size={15} color="#7c3aed" />
+              <Text style={styles.guaranteeText}>Easy Return & Refund</Text>
+            </View>
+          </View>
+
+          <View style={styles.divider} />
+
+          <Text style={styles.qtyLabel}>{t('quantity')}</Text>
+          <View style={styles.qtyRow}>
+            <TouchableOpacity style={styles.qtyBtn} onPress={() => setQty((q) => Math.max(1, q - 1))}>
+              <Text style={styles.qtyBtnText}>−</Text>
+            </TouchableOpacity>
+            <Text style={styles.qtyVal}>{qty}</Text>
+            <TouchableOpacity style={styles.qtyBtn} onPress={() => setQty((q) => q + 1)}>
+              <Text style={styles.qtyBtnText}>+</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.totalRow}>
+            <Text style={styles.totalLabel}>{t('totalAmountLabel')}</Text>
+            <Text style={styles.totalValue}>₹{product.price * qty}</Text>
+          </View>
+        </View>
+      </ScrollView>
+
+      <View style={styles.footer}>
+        <TouchableOpacity
+          style={[styles.addBtn, added && styles.addedBtn]}
+          onPress={handleAdd}
+          activeOpacity={0.85}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Ionicons
+              name={added ? "checkmark-circle-outline" : "cart-outline"}
+              size={18}
+              color={added ? "#ffffff" : "#a855f7"}
+            />
+            <Text style={[styles.addBtnText, added && styles.addedBtnText]}>
+              {added ? t('addedCartBtn') : t('addCartBtn')}
+            </Text>
+          </View>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.buyBtn}
+          onPress={handleBuyNow}
+          activeOpacity={0.85}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Ionicons name="flash-outline" size={18} color="#ffffff" />
+            <Text style={styles.buyBtnText}>
+              Buy Now
+            </Text>
+          </View>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#f8fafc' },
+  image: { width: '100%', height: 240, resizeMode: 'contain', backgroundColor: '#ffffff' },
+  imagePlaceholder: { width: '100%', height: 240, backgroundColor: '#f8fafc', alignItems: 'center', justifyContent: 'center' },
+  content: { padding: 20, backgroundColor: '#ffffff', borderTopLeftRadius: 24, borderTopRightRadius: 24, marginTop: -20, minHeight: 400 },
+  badgeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  category: { fontSize: 12, color: '#a855f7', fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1 },
+  ratingBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#fef3c7', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  ratingText: { fontSize: 11, fontWeight: '700', color: '#d97706' },
+  name: { fontSize: 24, fontWeight: '800', color: '#0f172a', marginBottom: 6 },
+  price: { fontSize: 26, fontWeight: '800', color: '#a855f7', marginBottom: 4 },
+  perKg: { fontSize: 14, color: '#94a3b8', fontWeight: '500' },
+  deliveryBox: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#f0fdf4', padding: 12, borderRadius: 12, marginVertical: 12 },
+  deliveryText: { fontSize: 13, fontWeight: '700', color: '#166534' },
+  descContainer: { marginTop: 12 },
+  descTitle: { fontSize: 15, fontWeight: '800', color: '#0f172a', marginBottom: 6 },
+  description: { fontSize: 14, color: '#64748b', lineHeight: 22 },
+  divider: { height: 1, backgroundColor: '#f1f5f9', marginVertical: 16 },
+  guarantees: { flexDirection: 'row', gap: 16, justifyContent: 'space-around', marginVertical: 4 },
+  guaranteeItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  guaranteeText: { fontSize: 12, color: '#64748b', fontWeight: '700' },
+  qtyLabel: { fontSize: 14, fontWeight: '700', color: '#475569', marginBottom: 12 },
+  qtyRow: { flexDirection: 'row', alignItems: 'center', gap: 20, marginBottom: 20 },
+  qtyBtn: {
+    width: 44, height: 44, borderRadius: 12,
+    backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: '#e2e8f0',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  qtyBtnText: { color: '#0f172a', fontSize: 22, fontWeight: '700', lineHeight: 26 },
+  qtyVal: { fontSize: 22, fontWeight: '800', color: '#0f172a', minWidth: 30, textAlign: 'center' },
+  totalRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    backgroundColor: '#faf5ff', padding: 16, borderRadius: 14,
+    borderWidth: 1, borderColor: '#e9d5ff',
+  },
+  totalLabel: { fontSize: 15, color: '#475569', fontWeight: '600' },
+  totalValue: { fontSize: 22, fontWeight: '800', color: '#a855f7' },
+  footer: { padding: 16, paddingBottom: 28, backgroundColor: '#ffffff', borderTopWidth: 1, borderTopColor: '#f1f5f9', flexDirection: 'row', gap: 12 },
+  addBtn: { flex: 1, backgroundColor: '#faf5ff', borderWidth: 1.5, borderColor: '#a855f7', borderRadius: 14, paddingVertical: 16, alignItems: 'center', justifyContent: 'center' },
+  addedBtn: { backgroundColor: '#7c3aed', borderColor: '#7c3aed' },
+  addBtnText: { color: '#a855f7', fontSize: 15, fontWeight: '800' },
+  addedBtnText: { color: '#ffffff' },
+  buyBtn: { flex: 1.2, backgroundColor: '#a855f7', borderRadius: 14, paddingVertical: 16, alignItems: 'center', justifyContent: 'center' },
+  buyBtnText: { color: '#ffffff', fontSize: 16, fontWeight: '800' },
+  errorText: { color: '#94a3b8', textAlign: 'center', marginTop: 40 },
+});
