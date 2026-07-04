@@ -3,6 +3,7 @@ import {
   View, Text, Image, ScrollView, TouchableOpacity,
   StyleSheet, ActivityIndicator,
 } from 'react-native';
+import PremiumImage from '../components/PremiumImage';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../navigation/AppNavigator';
@@ -21,8 +22,13 @@ interface Product {
   name: { en: string; mr: string } | string;
   description: string;
   price: number;
+  mrp?: number;
+  discount?: number;
+  unit?: string;
+  brand?: string;
   image?: string;
   category: string;
+  subcategory?: string;
 }
 
 export default function ProductDetailScreen({ route, navigation }: Props) {
@@ -57,40 +63,49 @@ export default function ProductDetailScreen({ route, navigation }: Props) {
     navigation.navigate('Checkout');
   };
 
-  if (loading) return <ActivityIndicator size="large" color="#a855f7" style={{ flex: 1, backgroundColor: '#f8fafc' }} />;
+  if (loading) return <View style={styles.container}><ActivityIndicator size="large" color="#a855f7" /></View>;
   if (!product) return <View style={styles.container}><Text style={styles.errorText}>{t('productNotFound')}</Text></View>;
 
   return (
     <View style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
-        {product.image ? (
-          <Image source={{ uri: product.image }} style={styles.image} />
-        ) : (
-          <View style={styles.imagePlaceholder}>
-            <Ionicons name="cube-outline" size={72} color="#cbd5e1" />
+        <PremiumImage
+          uri={product.image}
+          style={styles.image}
+          iconName="leaf-outline"
+          iconSize={56}
+        />
+        {(product.discount ?? 0) > 0 && (
+          <View style={styles.imageDiscountBadge}>
+            <Text style={styles.imageDiscountText}>{product.discount}% OFF</Text>
           </View>
         )}
         <View style={styles.content}>
           <View style={styles.badgeRow}>
-            <Text style={styles.category}>{tCategory(product.category)}</Text>
+            {product.brand ? (
+              <Text style={styles.brand}>{product.brand}</Text>
+            ) : (
+              <Text style={styles.category}>{tCategory(product.category)}</Text>
+            )}
+            {product.subcategory && (
+              <View style={styles.subcategoryBadge}>
+                <Text style={styles.subcategoryBadgeText}>{product.subcategory}</Text>
+              </View>
+            )}
             <View style={styles.ratingBadge}>
               <Ionicons name="star" size={12} color="#fbbf24" />
               <Text style={styles.ratingText}>4.8 (80+ ratings)</Text>
             </View>
           </View>
           <Text style={styles.name}>{tProduct(product.name)}</Text>
-          <Text style={styles.price}>
-            ₹{product.price}{' '}
-            <Text style={styles.perKg}>
-              / {(() => {
-                const cat = (product.category || '').toLowerCase();
-                if (cat.includes('veg') || cat.includes('green') || cat.includes('root') || cat.includes('herb') || cat.includes('fruit')) {
-                  return t('perKg');
-                }
-                return t('perPc');
-              })()}
-            </Text>
-          </Text>
+          <Text style={styles.unitText}>{product.unit || '1 pc'}</Text>
+          
+          <View style={styles.priceContainer}>
+            <Text style={styles.price}>₹{product.price}</Text>
+            {product.mrp != null && product.mrp > product.price && (
+              <Text style={styles.mrpText}>MRP ₹{product.mrp}</Text>
+            )}
+          </View>
 
           {/* Delivery Promise */}
           <View style={styles.deliveryBox}>
@@ -178,15 +193,22 @@ const styles = StyleSheet.create({
   image: { width: '100%', height: 240, resizeMode: 'contain', backgroundColor: '#ffffff' },
   imagePlaceholder: { width: '100%', height: 240, backgroundColor: '#f8fafc', alignItems: 'center', justifyContent: 'center' },
   content: { padding: 20, backgroundColor: '#ffffff', borderTopLeftRadius: 24, borderTopRightRadius: 24, marginTop: -20, minHeight: 400 },
-  badgeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  badgeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 8, flexWrap: 'wrap' },
   category: { fontSize: 12, color: '#a855f7', fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1 },
+  brand: { fontSize: 13, color: '#0f172a', fontWeight: '700', letterSpacing: 0.5 },
+  subcategoryBadge: { backgroundColor: '#ddd6fe', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 },
+  subcategoryBadgeText: { fontSize: 12, fontWeight: '600', color: '#6d28d9' },
   ratingBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#fef3c7', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
   ratingText: { fontSize: 11, fontWeight: '700', color: '#d97706' },
-  name: { fontSize: 24, fontWeight: '800', color: '#0f172a', marginBottom: 6 },
-  price: { fontSize: 26, fontWeight: '800', color: '#a855f7', marginBottom: 4 },
-  perKg: { fontSize: 14, color: '#94a3b8', fontWeight: '500' },
-  deliveryBox: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#f0fdf4', padding: 12, borderRadius: 12, marginVertical: 12 },
-  deliveryText: { fontSize: 13, fontWeight: '700', color: '#166534' },
+  name: { fontSize: 22, fontWeight: '800', color: '#0f172a', marginBottom: 4 },
+  unitText: { fontSize: 14, color: '#64748b', fontWeight: '600', marginBottom: 12 },
+  priceContainer: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
+  price: { fontSize: 24, fontWeight: '800', color: '#0f172a' },
+  mrpText: { fontSize: 14, color: '#94a3b8', textDecorationLine: 'line-through', fontWeight: '500', marginTop: 4 },
+  imageDiscountBadge: { position: 'absolute', top: 20, right: 20, backgroundColor: '#3b82f6', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
+  imageDiscountText: { color: '#ffffff', fontWeight: '800', fontSize: 14 },
+  deliveryBox: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#f8fafc', padding: 12, borderRadius: 12, marginVertical: 12, borderWidth: 1, borderColor: '#e2e8f0' },
+  deliveryText: { fontSize: 13, fontWeight: '700', color: '#475569' },
   descContainer: { marginTop: 12 },
   descTitle: { fontSize: 15, fontWeight: '800', color: '#0f172a', marginBottom: 6 },
   description: { fontSize: 14, color: '#64748b', lineHeight: 22 },

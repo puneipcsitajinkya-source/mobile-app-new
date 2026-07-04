@@ -1,14 +1,21 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View, Text, FlatList, TextInput, TouchableOpacity,
-  Image, StyleSheet, ActivityIndicator, ScrollView, RefreshControl,
+  Image, StyleSheet, ScrollView, RefreshControl, Dimensions,
+  Platform, Modal, ActivityIndicator
 } from 'react-native';
+import PremiumLoader from '../components/PremiumLoader';
+import PremiumImage from '../components/PremiumImage';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { getProducts, getCategories } from '../services/api';
 import { useCart } from '../hooks/useCart';
 import { useLanguage } from '../hooks/useLanguage';
+import { useNetwork } from '../hooks/useNetwork';
 import { Ionicons } from '@expo/vector-icons';
+
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const APP_LOGO = require('../../assets/icon.png');
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'Main'> };
 
@@ -17,6 +24,9 @@ interface Product {
   name: { en: string; mr: string } | string;
   description: string;
   price: number;
+  mrp?: number;
+  discount?: number;
+  unit?: string;
   image?: string;
   category: string;
 }
@@ -25,25 +35,27 @@ interface Category {
   _id: string;
   name: string;
   icon: string;
+  image?: string;
 }
+
+const { width } = Dimensions.get('window');
 
 export default function HomeScreen({ navigation }: Props) {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [filtered, setFiltered] = useState<Product[]>([]);
   const [search, setSearch] = useState('');
-  const [category, setCategory] = useState('All');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const { addToCart, totalItems } = useCart();
+  const { addToCart, items: cart, totalItems, totalAmount: cartTotal } = useCart();
   const [added, setAdded] = useState<string | null>(null);
-  const { language, toggleLanguage, t, tProduct, tCategory } = useLanguage();
+  const [langModalVisible, setLangModalVisible] = useState(false);
+  const { language, setLanguage, translating, t, tProduct, tCategory } = useLanguage();
+  const { onReconnect } = useNetwork();
 
   const load = useCallback(async () => {
     try {
       const [prodRes, catRes] = await Promise.all([getProducts(), getCategories()]);
       setProducts(prodRes.data);
-      setFiltered(prodRes.data);
       setCategories(catRes.data);
     } catch (e) {
       console.error(e);
@@ -55,198 +67,308 @@ export default function HomeScreen({ navigation }: Props) {
 
   useEffect(() => { load(); }, []);
 
-  // Filter out any duplicate category names returned from the backend
+  useEffect(() => {
+    const unsubscribe = onReconnect(() => {
+      setRefreshing(true);
+      load();
+    });
+    return unsubscribe;
+  }, [onReconnect, load]);
+
   const uniqueCategories = useMemo(() => {
     const seen = new Set<string>();
     return categories.filter((cat) => {
       const name = (cat.name || '').trim();
-      if (!name || seen.has(name.toLowerCase())) {
-        return false;
-      }
+      if (!name || seen.has(name.toLowerCase())) return false;
       seen.add(name.toLowerCase());
       return true;
     });
   }, [categories]);
 
-  useEffect(() => {
-    let result = products;
-    if (category !== 'All') {
-      result = result.filter(
-        (p) => (p.category || '').trim().toLowerCase() === category.trim().toLowerCase()
-      );
-    }
-    if (search) {
-      result = result.filter((p) => {
+  const productsByCategory = useMemo(() => {
+    if (search.trim()) {
+      const lower = search.toLowerCase();
+      const filtered = products.filter(p => {
         const nameObj = p.name;
         if (typeof nameObj === 'object') {
-          return (
-            nameObj.en.toLowerCase().includes(search.toLowerCase()) ||
-            nameObj.mr.toLowerCase().includes(search.toLowerCase())
-          );
+          return nameObj.en.toLowerCase().includes(lower) || nameObj.mr.toLowerCase().includes(lower);
         }
-        return String(nameObj).toLowerCase().includes(search.toLowerCase());
+        return String(nameObj).toLowerCase().includes(lower);
       });
+      return filtered.length > 0
+        ? [{ category: { _id: 'search', name: 'Search Results', icon: '🔍' }, products: filtered }]
+        : [];
     }
-    setFiltered(result);
-  }, [search, category, products]);
+
+    return uniqueCategories.map(cat => ({
+      category: cat,
+      products: products.filter(p => (p.category || '').toLowerCase() === cat.name.toLowerCase())
+    })).filter(group => group.products.length > 0);
+  }, [products, uniqueCategories, search]);
 
   const handleAdd = (product: Product) => {
-    addToCart({ _id: product._id, name: product.name, price: product.price, image: product.image });
+    addToCart({ _id: product._id, name: product.name, price: product.price, image: product.image, mrp: product.mrp });
     setAdded(product._id);
     setTimeout(() => setAdded(null), 1000);
   };
 
-  const renderProduct = ({ item }: { item: Product }) => (
-    <TouchableOpacity
-      style={styles.card}
-      onPress={() => navigation.navigate('ProductDetail', { productId: item._id })}
-      activeOpacity={0.9}
-    >
-      {item.image ? (
+  const getProductQty = (id: string) => {
+    const item = cart.find(c => c._id === id);
+    return item ? item.quantity : 0;
+  };
+
+  const renderProduct = (item: Product) => {
+    const qty = getProductQty(item._id);
+    return (
+      <TouchableOpacity
+        key={item._id}
+        style={styles.card}
+        onPress={() => navigation.navigate('ProductDetail', { productId: item._id })}
+        activeOpacity={0.9}
+      >
         <View style={styles.cardImgContainer}>
-          <Image source={{ uri: item.image }} style={styles.cardImg} />
-          <View style={styles.cardRating}>
-            <Ionicons name="star" size={10} color="#fbbf24" />
-            <Text style={styles.cardRatingText}>4.8</Text>
-          </View>
-        </View>
-      ) : (
-        <View style={styles.cardImgPlaceholder}>
-          <Ionicons name="cube-outline" size={40} color="#cbd5e1" />
-        </View>
-      )}
-      <View style={styles.cardBody}>
-        <Text style={styles.cardCategory}>{tCategory(item.category)}</Text>
-        <Text style={styles.cardName} numberOfLines={1}>{tProduct(item.name)}</Text>
-        <View style={styles.priceRow}>
-          <Text style={styles.cardPrice}>₹{item.price}</Text>
-          <TouchableOpacity
-            style={[styles.addBtn, added === item._id && styles.addedBtn]}
-            onPress={() => handleAdd(item)}
-            activeOpacity={0.7}
-          >
-            <Text style={[styles.addBtnText, added === item._id && styles.addedBtnText]}>
-              {added === item._id ? 'Added' : 'Add'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </TouchableOpacity>
-  );
-
-  const renderHeader = () => (
-    <View style={{ backgroundColor: '#ffffff' }}>
-      {/* Search */}
-      <View style={styles.searchRow}>
-        <View style={styles.searchBox}>
-          <Ionicons name="search-outline" size={18} color="#94a3b8" style={{ marginRight: 8 }} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder={t('searchPlaceholder')}
-            placeholderTextColor="#94a3b8"
-            value={search}
-            onChangeText={setSearch}
+          <PremiumImage
+            uri={item.image}
+            style={styles.cardImg}
+            iconName="leaf-outline"
+            iconSize={28}
           />
+          {(item.discount ?? 0) > 0 && (
+            <View style={styles.discountBadge}>
+              <Text style={styles.discountText}>{item.discount}% OFF</Text>
+            </View>
+          )}
         </View>
-        {/* <TouchableOpacity style={styles.filterBtn} activeOpacity={0.7}>
-          <Ionicons name="options-outline" size={18} color="#a855f7" />
-        </TouchableOpacity> */}
-      </View>
+        <View style={styles.cardBody}>
+          <Text style={styles.cardUnit}>{item.unit || '1 pc'}</Text>
+          <Text style={styles.cardName} numberOfLines={2}>{tProduct(item.name)}</Text>
 
-      {/* Promo Banners */}
-      <View style={styles.promoContainer}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}>
-          {/* <View style={[styles.promoCard, { backgroundColor: '#7c3aed' }]}>
-            <View style={styles.promoContent}>
-              <View style={styles.promoBadge}><Text style={styles.promoBadgeText}>Special Promo</Text></View>
-              <Text style={styles.promoTitle}>Fresh Produce</Text>
-              <Text style={styles.promoSub}>Get up to 20% OFF today</Text>
+          <View style={styles.priceRow}>
+            <View>
+              <Text style={styles.cardPrice}>₹{item.price}</Text>
+              {item.mrp != null && item.mrp > item.price && (
+                <Text style={styles.cardMrp}>₹{item.mrp}</Text>
+              )}
             </View>
-            <Ionicons name="leaf" size={80} color="rgba(255,255,255,0.15)" style={styles.promoBgIcon} />
-          </View> */}
-          <View style={[styles.promoCard, { backgroundColor: '#ec4899' }]}>
-            <View style={styles.promoContent}>
-              <View style={[styles.promoBadge, { backgroundColor: '#fdf2f8' }]}><Text style={[styles.promoBadgeText, { color: '#ec4899' }]}>Free Delivery</Text></View>
-              <Text style={styles.promoTitle}>Super Fast Delivery</Text>
-              <Text style={styles.promoSub}>Within 15 mins at your door</Text>
-            </View>
-            <Ionicons name="flash" size={80} color="rgba(255,255,255,0.15)" style={styles.promoBgIcon} />
-          </View>
-        </ScrollView>
-      </View>
-
-      {/* Categories */}
-      <View style={styles.categoriesContainer}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoriesRow} contentContainerStyle={{ paddingHorizontal: 16, alignItems: 'center' }}>
-          <TouchableOpacity
-            key="All"
-            style={[styles.catChip, category === 'All' && styles.catChipActive]}
-            onPress={() => setCategory('All')}
-          >
-            <Text style={[styles.catChipText, category === 'All' && styles.catChipTextActive]}>{t('allCategory')}</Text>
-          </TouchableOpacity>
-          {uniqueCategories.map((cat) => (
             <TouchableOpacity
-              key={cat._id}
-              style={[styles.catChip, category.toLowerCase() === cat.name.toLowerCase() && styles.catChipActive]}
-              onPress={() => setCategory(cat.name)}
+              style={[styles.addBtn, qty > 0 && styles.addedBtn]}
+              onPress={() => handleAdd(item)}
+              activeOpacity={0.7}
             >
-              <Text style={[styles.catChipText, category.toLowerCase() === cat.name.toLowerCase() && styles.catChipTextActive]}>
-                {tCategory(cat.name)}
+              <Text style={[styles.addBtnText, qty > 0 && styles.addedBtnText]}>
+                {qty > 0 ? qty : 'ADD'}
               </Text>
             </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </View>
-    </View>
-  );
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  if (loading) {
+    return <PremiumLoader message="Loading fresh items..." icon="leaf" />;
+  }
 
   return (
     <View style={styles.container}>
-      {/* Header */}
+      {/* HEADER */}
       <View style={styles.header}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
-          <Image source={require('../../assets/icon.png')} style={styles.logo} />
-          <View>
-            <Text style={styles.headerTitle}>{t('appTitle')}</Text>
-            <Text style={styles.headerSub}>{t('appSub')}</Text>
+        <View style={styles.headerTop}>
+          <View style={styles.headerLeft}>
+            <View style={styles.headerBrand}>
+              <Image source={APP_LOGO} style={styles.headerLogo} />
+              <View>
+                <Text style={styles.deliveryTitle}>Firstmart</Text>
+                <Text style={styles.deliverySubtitle}>Delivery in 10 minutes</Text>
+              </View>
+            </View>
+
           </View>
+          <TouchableOpacity style={styles.profileBtn}>
+            <Ionicons name="person-circle-outline" size={36} color="#ffffff" />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.languageTogglePill} onPress={() => setLangModalVisible(true)}>
+            <Ionicons name="globe-outline" size={15} color="#ffffff" style={{ marginRight: 4 }} />
+            <Text style={styles.languageToggleText}>{language.toUpperCase()}</Text>
+          </TouchableOpacity>
         </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-          <TouchableOpacity style={styles.langBtn} onPress={toggleLanguage}>
-            <Text style={styles.langBtnText}>{language === 'en' ? 'मराठी' : 'EN'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.cartBtn} onPress={() => navigation.navigate('Cart' as any)}>
-            <Ionicons name="cart-outline" size={24} color="#0f172a" />
-            {totalItems > 0 && (
-              <View style={styles.badge}><Text style={styles.badgeText}>{totalItems}</Text></View>
-            )}
-          </TouchableOpacity>
+
+        <View style={styles.searchRow}>
+          <View style={styles.searchBox}>
+            <Ionicons name="search-outline" size={20} color="#64748b" style={{ marginRight: 8 }} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder='Search "milk"'
+              placeholderTextColor="#94a3b8"
+              value={search}
+              onChangeText={setSearch}
+            />
+          </View>
         </View>
       </View>
 
-      {/* Products & Main List */}
-      {loading ? (
-        <ActivityIndicator size="large" color="#a855f7" style={{ flex: 1 }} />
-      ) : filtered.length === 0 ? (
-        <View style={{ flex: 1 }}>
-          {renderHeader()}
-          <View style={styles.emptyState}>
-            <Ionicons name="alert-circle-outline" size={48} color="#94a3b8" />
-            <Text style={styles.emptyText}>{t('productNotFound')}</Text>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingBottom: 100 }}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
+      >
+        {/* PROMO BANNER */}
+        {!search && (
+          <View style={styles.promoContainer}>
+            <Image
+              source={{ uri: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&q=80&w=1000' }}
+              style={styles.promoImg}
+            />
+            <View style={styles.promoOverlay}>
+              <Text style={styles.promoTitle}>Super Fast Delivery</Text>
+              <Text style={styles.promoSub}>Fresh groceries in minutes</Text>
+            </View>
           </View>
+        )}
+
+        {/* CATEGORY GRID */}
+        {!search && (
+          <View style={styles.categoryGridContainer}>
+            {uniqueCategories.map((cat) => (
+              <TouchableOpacity
+                key={cat._id}
+                style={styles.catGridItem}
+                activeOpacity={0.7}
+                onPress={() => navigation.navigate('CategoryProducts', { categoryName: cat.name })}
+              >
+                <View style={styles.catGridImgContainer}>
+                  {cat.image ? (
+                    <PremiumImage
+                      uri={cat.image}
+                      style={styles.catGridImg}
+                      iconName="grid-outline"
+                      iconSize={22}
+                    />
+                  ) : (
+                    <Text style={styles.catGridIcon}>{cat.icon}</Text>
+                  )}
+                </View>
+                <Text style={styles.catGridText} numberOfLines={2}>{tCategory(cat.name)}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
+        {/* PRODUCTS BY CATEGORY */}
+        {productsByCategory.map((group) => (
+          <View key={group.category._id} style={styles.horizontalSection}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>{group.category.name === 'Search Results' ? group.category.name : tCategory(group.category.name)}</Text>
+              {group.category.name !== 'Search Results' && (
+                <TouchableOpacity onPress={() => navigation.navigate('CategoryProducts', { categoryName: group.category.name })}>
+                  <Text style={styles.seeAllText}>See all</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalScroll}>
+              {group.products.map(p => renderProduct(p))}
+            </ScrollView>
+          </View>
+        ))}
+
+        {productsByCategory.length === 0 && search && (
+          <View style={styles.emptyState}>
+            <View style={styles.emptyIconBox}>
+              <Ionicons name="search-outline" size={44} color="#a855f7" />
+            </View>
+            <Text style={styles.emptyTitle}>No products found</Text>
+            <Text style={styles.emptySubText}>Try a different keyword or check back later.</Text>
+          </View>
+        )}
+      </ScrollView>
+
+      {/* STICKY CART */}
+      {totalItems > 0 && (
+        <View style={styles.stickyCartWrapper}>
+          <TouchableOpacity
+            style={styles.stickyCart}
+            activeOpacity={0.9}
+            onPress={() => navigation.navigate('Cart' as any)}
+          >
+            <View style={styles.cartInfo}>
+              <View style={styles.cartIconWrapper}>
+                <Ionicons name="cart" size={20} color="#a855f7" />
+              </View>
+              <View>
+                <Text style={styles.cartItemsText}>{totalItems} item{totalItems > 1 ? 's' : ''}</Text>
+                <Text style={styles.cartTotalText}>₹{cartTotal}</Text>
+              </View>
+            </View>
+            <View style={styles.cartAction}>
+              <Text style={styles.cartActionText}>View Cart</Text>
+              <Ionicons name="caret-forward" size={16} color="#ffffff" />
+            </View>
+          </TouchableOpacity>
         </View>
-      ) : (
-        <FlatList
-          data={filtered}
-          renderItem={renderProduct}
-          keyExtractor={(item) => item._id}
-          numColumns={2}
-          ListHeaderComponent={renderHeader}
-          contentContainerStyle={styles.grid}
-          showsVerticalScrollIndicator={false}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor="#a855f7" />}
-        />
+      )}
+      {/* Language Selection Modal */}
+      <Modal
+        visible={langModalVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setLangModalVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setLangModalVisible(false)}
+        >
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Select Language / भाषा</Text>
+
+            <TouchableOpacity
+              style={[styles.langOption, language === 'en' && styles.activeLangOption]}
+              onPress={() => {
+                setLangModalVisible(false);
+                setLanguage('en');
+              }}
+            >
+              <Text style={[styles.langText, language === 'en' && styles.activeLangText]}>🇬🇧 English</Text>
+              {language === 'en' && <Ionicons name="checkmark-circle" size={20} color="#a855f7" />}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.langOption, language === 'hi' && styles.activeLangOption]}
+              onPress={() => {
+                setLangModalVisible(false);
+                setLanguage('hi');
+              }}
+            >
+              <Text style={[styles.langText, language === 'hi' && styles.activeLangText]}>🇮🇳 हिंदी (Hindi)</Text>
+              {language === 'hi' && <Ionicons name="checkmark-circle" size={20} color="#a855f7" />}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.langOption, language === 'mr' && styles.activeLangOption]}
+              onPress={() => {
+                setLangModalVisible(false);
+                setLanguage('mr');
+              }}
+            >
+              <Text style={[styles.langText, language === 'mr' && styles.activeLangText]}>🇮🇳 मराठी (Marathi)</Text>
+              {language === 'mr' && <Ionicons name="checkmark-circle" size={20} color="#a855f7" />}
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.closeBtn} onPress={() => setLangModalVisible(false)}>
+              <Text style={styles.closeBtnText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Translating Spinner Overlay */}
+      {translating && (
+        <View style={styles.translatingOverlay}>
+          <ActivityIndicator size="large" color="#a855f7" />
+          <Text style={styles.translatingText}>Translating application...</Text>
+          <Text style={styles.translatingSubText}>कृपया प्रतीक्षा करा / कृपया प्रतीक्षा करें</Text>
+        </View>
       )}
     </View>
   );
@@ -255,98 +377,209 @@ export default function HomeScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8fafc' },
   header: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 20, paddingTop: 56, paddingBottom: 16,
-    backgroundColor: '#ffffff',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 8, elevation: 2,
+    backgroundColor: '#a855f7',
+    paddingTop: Platform.OS === 'ios' ? 50 : 40,
+    paddingBottom: 16,
+    paddingHorizontal: 16,
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 16,
   },
-  headerTitle: { fontSize: 22, fontWeight: '800', color: '#0f172a' },
-  headerSub: { fontSize: 13, color: '#94a3b8', marginTop: 2, marginRight: 8 },
-  logo: { width: 44, height: 44, borderRadius: 10 },
-  cartBtn: { padding: 8, position: 'relative' },
-  langBtn: {
-    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20,
-    backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: '#e2e8f0',
-    alignItems: 'center', justifyContent: 'center', height: 36,
+  headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  headerLeft: { flex: 1 },
+  headerBrand: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 2,
   },
-  langBtnText: { fontSize: 13, fontWeight: '700', color: '#a855f7' },
-  badge: {
-    position: 'absolute', top: 2, right: 2, backgroundColor: '#a855f7',
-    borderRadius: 10, minWidth: 18, height: 18, alignItems: 'center', justifyContent: 'center',
+  headerLogo: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    marginRight: 10,
   },
-  badgeText: { color: '#fff', fontSize: 10, fontWeight: '800' },
-  searchRow: { paddingHorizontal: 16, paddingVertical: 8, backgroundColor: '#ffffff', flexDirection: 'row', gap: 10, alignItems: 'center' },
-  searchBox: {
-    flex: 1,
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#f1f5f9', borderRadius: 12,
-    paddingHorizontal: 12, paddingVertical: 8,
-    borderWidth: 1, borderColor: '#e2e8f0',
+  deliveryTitle: { color: '#ffffff', fontSize: 18, fontWeight: '800', lineHeight: 20 },
+  deliverySubtitle: { color: 'rgba(255,255,255,0.8)', fontSize: 11, fontWeight: '500', lineHeight: 14 },
+  locationRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
+  locationText: { color: '#f8fafc', fontSize: 13, marginRight: 4, maxWidth: '90%' },
+  languageTogglePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    marginLeft: 12,
   },
-  searchInput: { flex: 1, fontSize: 14, color: '#0f172a', paddingVertical: 0 },
-  filterBtn: {
-    width: 38, height: 38, borderRadius: 10,
-    backgroundColor: '#faf5ff', borderWidth: 1, borderColor: '#e9d5ff',
-    alignItems: 'center', justifyContent: 'center',
+  languageToggleText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '800',
   },
-  promoContainer: { height: 135, marginTop: 14, marginBottom: 8, backgroundColor: '#ffffff' },
-  promoCard: {
-    width: 290, height: 120, borderRadius: 20,
-    padding: 16, flexDirection: 'row', overflow: 'hidden', position: 'relative',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 3,
+  profileBtn: {},
+  searchRow: { backgroundColor: '#ffffff', borderRadius: 12, overflow: 'hidden' },
+  searchBox: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, height: 44 },
+  searchInput: { flex: 1, fontSize: 15, color: '#0f172a' },
+  promoContainer: { margin: 16, height: 120, borderRadius: 12, overflow: 'hidden', backgroundColor: '#e2e8f0' },
+  promoImg: { width: '100%', height: '100%', resizeMode: 'cover' },
+  promoOverlay: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', padding: 16
   },
-  promoContent: { flex: 1, justifyContent: 'center' },
-  promoBadge: {
-    backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 8, paddingVertical: 3,
-    borderRadius: 8, alignSelf: 'flex-start', marginBottom: 6,
+  promoTitle: { color: '#ffffff', fontSize: 20, fontWeight: '800' },
+  promoSub: { color: '#f8fafc', fontSize: 13, marginTop: 4 },
+  categoryGridContainer: {
+    flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 8, marginBottom: 16
   },
-  promoBadgeText: { fontSize: 10, fontWeight: '800', color: '#ffffff', textTransform: 'uppercase' },
-  promoTitle: { fontSize: 18, fontWeight: '800', color: '#ffffff' },
-  promoSub: { fontSize: 12, color: '#f8fafc', marginTop: 2, fontWeight: '500' },
-  promoBgIcon: { position: 'absolute', right: -10, bottom: -10 },
-  categoriesContainer: { height: 50, backgroundColor: '#ffffff', marginVertical: 4, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
-  categoriesRow: { flex: 1 },
-  catChip: {
-    paddingHorizontal: 16, paddingVertical: 6, borderRadius: 20,
-    backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: '#e2e8f0', marginRight: 8,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 36,
+  catGridItem: { width: width / 4 - 4, alignItems: 'center', paddingVertical: 8, paddingHorizontal: 4 },
+  catGridImgContainer: {
+    width: 60, height: 60, borderRadius: 30, backgroundColor: '#f1f5f9',
+    alignItems: 'center', justifyContent: 'center', overflow: 'hidden', marginBottom: 6,
+    borderWidth: 1, borderColor: '#e2e8f0'
   },
-  catChipActive: { backgroundColor: '#f3e8ff', borderColor: '#a855f7' },
-  catChipText: { color: '#64748b', fontSize: 13, fontWeight: '600' },
-  catChipTextActive: { color: '#a855f7' },
-  grid: { padding: 10, backgroundColor: '#f8fafc' },
+  catGridImg: { width: '100%', height: '100%', resizeMode: 'cover' },
+  catGridIcon: { fontSize: 28 },
+  catGridText: { fontSize: 11, color: '#475569', fontWeight: '500', textAlign: 'center', lineHeight: 14 },
+  horizontalSection: { marginBottom: 24 },
+  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, marginBottom: 12 },
+  sectionTitle: { fontSize: 18, fontWeight: '800', color: '#0f172a' },
+  seeAllText: { fontSize: 14, fontWeight: '600', color: '#a855f7' },
+  horizontalScroll: { paddingHorizontal: 12, paddingBottom: 4 },
   card: {
-    flex: 1, maxWidth: '47%', margin: 6, backgroundColor: '#ffffff', borderRadius: 20,
+    width: 140, backgroundColor: '#ffffff', borderRadius: 12, marginHorizontal: 4,
     borderWidth: 1, borderColor: '#e2e8f0', overflow: 'hidden',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.03, shadowRadius: 10, elevation: 2,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2,
   },
-  cardImgContainer: { width: '100%', height: 125, position: 'relative', borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
-  cardImg: { width: '100%', height: '100%', resizeMode: 'cover' },
-  cardRating: {
-    position: 'absolute', bottom: 6, left: 6,
-    backgroundColor: '#ffffff', flexDirection: 'row', alignItems: 'center', gap: 3,
-    paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 1,
+  cardImgContainer: { width: '100%', height: 120, backgroundColor: '#f8fafc', position: 'relative' },
+  cardImg: { width: '100%', height: '100%', resizeMode: 'contain' },
+  cardImgPlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  discountBadge: {
+    position: 'absolute', top: 0, left: 0, backgroundColor: '#3b82f6',
+    paddingHorizontal: 6, paddingVertical: 2, borderBottomRightRadius: 8
   },
-  cardRatingText: { fontSize: 9, fontWeight: '800', color: '#0f172a' },
-  cardImgPlaceholder: {
-    width: '100%', height: 125, backgroundColor: '#f8fafc',
-    alignItems: 'center', justifyContent: 'center', borderBottomWidth: 1, borderBottomColor: '#f1f5f9',
-  },
-  cardBody: { padding: 12 },
-  cardCategory: { fontSize: 9, color: '#94a3b8', fontWeight: '700', textTransform: 'uppercase', marginBottom: 2 },
-  cardName: { fontSize: 14, fontWeight: '700', color: '#0f172a', marginBottom: 6 },
-  priceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  cardPrice: { fontSize: 15, fontWeight: '800', color: '#0f172a' },
+  discountText: { color: '#ffffff', fontSize: 10, fontWeight: '800' },
+  cardBody: { padding: 10 },
+  cardUnit: { fontSize: 11, color: '#64748b', marginBottom: 4 },
+  cardName: { fontSize: 13, fontWeight: '600', color: '#0f172a', marginBottom: 8, height: 36, lineHeight: 18 },
+  priceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
+  cardPrice: { fontSize: 14, fontWeight: '800', color: '#0f172a' },
+  cardMrp: { fontSize: 11, color: '#94a3b8', textDecorationLine: 'line-through', marginTop: 2 },
   addBtn: {
-    backgroundColor: '#ffffff', borderWidth: 1.5, borderColor: '#a855f7',
-    borderRadius: 8, paddingHorizontal: 12, paddingVertical: 4,
-    alignItems: 'center', justifyContent: 'center', minWidth: 52,
+    backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#a855f7',
+    borderRadius: 6, paddingHorizontal: 10, paddingVertical: 4, minWidth: 50, alignItems: 'center'
   },
-  addedBtn: { backgroundColor: '#22c55e', borderColor: '#22c55e' },
-  addBtnText: { color: '#a855f7', fontWeight: '800', fontSize: 11 },
-  addedBtnText: { color: '#ffffff', fontWeight: '800', fontSize: 11 },
-  emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 80, backgroundColor: '#f8fafc' },
-  emptyText: { color: '#94a3b8', fontSize: 16 },
+  addedBtn: { backgroundColor: '#a855f7' },
+  addBtnText: { color: '#a855f7', fontSize: 12, fontWeight: '800' },
+  addedBtnText: { color: '#ffffff' },
+  emptyState: {
+    alignItems: 'center', justifyContent: 'center',
+    paddingVertical: 36, paddingHorizontal: 20,
+    marginHorizontal: 16, marginTop: 8,
+    borderRadius: 16, backgroundColor: '#ffffff',
+    borderWidth: 1, borderColor: '#e2e8f0'
+  },
+  emptyIconBox: {
+    width: 68, height: 68, borderRadius: 34,
+    backgroundColor: '#faf5ff', alignItems: 'center', justifyContent: 'center', marginBottom: 12
+  },
+  emptyTitle: { color: '#0f172a', fontSize: 17, fontWeight: '800', marginBottom: 6 },
+  emptySubText: { color: '#64748b', fontSize: 13, textAlign: 'center', lineHeight: 20 },
+  emptyText: { color: '#64748b', fontSize: 16, marginTop: 12 },
+  stickyCartWrapper: {
+    position: 'absolute', bottom: 20, left: 16, right: 16,
+    zIndex: 100,
+  },
+  stickyCart: {
+    backgroundColor: '#a855f7', borderRadius: 12, flexDirection: 'row',
+    alignItems: 'center', justifyContent: 'space-between', padding: 12,
+    shadowColor: '#a855f7', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 6
+  },
+  cartInfo: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  cartIconWrapper: {
+    backgroundColor: '#ffffff', width: 36, height: 36, borderRadius: 18,
+    alignItems: 'center', justifyContent: 'center'
+  },
+  cartItemsText: { color: '#ffffff', fontSize: 12, fontWeight: '600', opacity: 0.9 },
+  cartTotalText: { color: '#ffffff', fontSize: 16, fontWeight: '800' },
+  cartAction: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  cartActionText: { color: '#ffffff', fontSize: 14, fontWeight: '700' },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    width: '80%',
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 5,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#0f172a',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  langOption: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginVertical: 4,
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  activeLangOption: {
+    borderColor: '#a855f7',
+    backgroundColor: '#faf5ff',
+  },
+  langText: {
+    fontSize: 16,
+    color: '#334155',
+    fontWeight: '500',
+  },
+  activeLangText: {
+    color: '#a855f7',
+    fontWeight: '700',
+  },
+  closeBtn: {
+    marginTop: 16,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  closeBtnText: {
+    color: '#64748b',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  translatingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    zIndex: 1000,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  translatingText: {
+    marginTop: 16,
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#0f172a',
+  },
+  translatingSubText: {
+    marginTop: 4,
+    fontSize: 14,
+    color: '#64748b',
+  },
 });
 

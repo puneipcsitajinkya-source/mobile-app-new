@@ -1,8 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity,
-  StyleSheet, ScrollView, Alert, ActivityIndicator,
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  ScrollView,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 import * as Location from 'expo-location';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
@@ -10,6 +18,11 @@ import { useCart } from '../hooks/useCart';
 import { placeOrder, getSettings } from '../services/api';
 import { useLanguage } from '../hooks/useLanguage';
 import { Ionicons } from '@expo/vector-icons';
+
+const STORAGE_MOBILE_KEY = '@checkout_mobile';
+const STORAGE_CONFIRM_MOBILE_KEY = '@checkout_confirm_mobile';
+const STORAGE_ADDRESS_KEY = '@checkout_address';
+const STORAGE_LOCATION_KEY = '@checkout_location';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'Checkout'> };
 
@@ -33,6 +46,63 @@ export default function CheckoutScreen({ navigation }: Props) {
   });
   const { t, tProduct } = useLanguage();
 
+  // Track if initial load from storage is done (to avoid overwriting stored data).
+  const storageLoaded = useRef(false);
+
+  // Load all saved fields on mount
+  useEffect(() => {
+    AsyncStorage.multiGet([STORAGE_MOBILE_KEY, STORAGE_CONFIRM_MOBILE_KEY, STORAGE_ADDRESS_KEY, STORAGE_LOCATION_KEY])
+      .then((pairs) => {
+        const savedMobile = pairs[0][1];
+        const savedConfirmMobile = pairs[1][1];
+        const savedAddress = pairs[2][1];
+        const savedLocation = pairs[3][1];
+        if (savedMobile) setMobile(savedMobile);
+        if (savedConfirmMobile) setConfirmMobile(savedConfirmMobile);
+        if (savedAddress) setAddress(savedAddress);
+        if (savedLocation) {
+          try { setLocation(JSON.parse(savedLocation)); } catch {}
+        }
+      })
+      .catch((err) => console.error('AsyncStorage load error:', err))
+      .finally(() => { storageLoaded.current = true; });
+  }, []);
+
+  // Auto-save mobile when it changes
+  useEffect(() => {
+    if (!storageLoaded.current) return;
+    AsyncStorage.setItem(STORAGE_MOBILE_KEY, mobile).catch(() => {});
+  }, [mobile]);
+
+  // Auto-save confirmMobile when it changes
+  useEffect(() => {
+    if (!storageLoaded.current) return;
+    AsyncStorage.setItem(STORAGE_CONFIRM_MOBILE_KEY, confirmMobile).catch(() => {});
+  }, [confirmMobile]);
+
+  // Auto-save address when it changes
+  useEffect(() => {
+    if (!storageLoaded.current) return;
+    AsyncStorage.setItem(STORAGE_ADDRESS_KEY, address).catch(() => {});
+  }, [address]);
+
+  // Auto-save location when it changes
+  useEffect(() => {
+    if (!storageLoaded.current) return;
+    if (location) {
+      AsyncStorage.setItem(STORAGE_LOCATION_KEY, JSON.stringify(location)).catch(() => {});
+    }
+  }, [location]);
+
+  // Clear all saved info
+  const handleClearSaved = () => {
+    AsyncStorage.multiRemove([STORAGE_MOBILE_KEY, STORAGE_CONFIRM_MOBILE_KEY, STORAGE_ADDRESS_KEY, STORAGE_LOCATION_KEY]).catch(() => {});
+    setMobile('');
+    setConfirmMobile('');
+    setAddress('');
+    setLocation(null);
+  };
+
   useEffect(() => {
     getSettings()
       .then((res) => {
@@ -43,46 +113,50 @@ export default function CheckoutScreen({ navigation }: Props) {
 
   const handleGetLocation = async () => {
     setLocLoading(true);
-    let captured = false;
     try {
+      // Request permission
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert(t('permissionDenied'), t('locationPermissionMsg'));
         return;
       }
 
-      // 1. Try to get last known position first (resolves instantly)
-      try {
-        const lastKnown = await Location.getLastKnownPositionAsync({});
-        if (lastKnown) {
-          setLocation({ latitude: lastKnown.coords.latitude, longitude: lastKnown.coords.longitude });
-          captured = true;
-        }
-      } catch (err) {
-        console.warn('Error getting last known position:', err);
-      }
-
-      // 2. Try to get fresh position with a 6-second safety timeout so it never hangs
-      try {
-        const freshLocPromise = Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
+      // Try last known position first (quick fallback)
+      const lastKnown = await Location.getLastKnownPositionAsync({});
+      if (lastKnown) {
+        setLocation({
+          latitude: lastKnown.coords.latitude,
+          longitude: lastKnown.coords.longitude,
         });
-        const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 6000));
-
-        const freshLoc = await Promise.race([freshLocPromise, timeoutPromise]);
-        if (freshLoc) {
-          setLocation({ latitude: freshLoc.coords.latitude, longitude: freshLoc.coords.longitude });
-          captured = true;
-        }
-      } catch (err) {
-        console.warn('Error getting current position:', err);
       }
 
-      if (!captured) {
+      // Helper to fetch location with timeout
+      const fetchLocation = async (accuracy: number, timeoutMs: number) => {
+        try {
+          return await Promise.race([
+            Location.getCurrentPositionAsync({ accuracy }),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+          ]);
+        } catch (e) {
+          console.warn(`Location fetch (${accuracy}) failed:`, e);
+          return null;
+        }
+      };
+
+      // Attempt low accuracy first, then balanced if needed
+      let fresh = await fetchLocation(Location.Accuracy.Low, 8000);
+      if (!fresh) fresh = await fetchLocation(Location.Accuracy.Balanced, 10000);
+
+      if (fresh) {
+        setLocation({
+          latitude: fresh.coords.latitude,
+          longitude: fresh.coords.longitude,
+        });
+      } else {
         Alert.alert(t('errorTitle'), t('locationErrorMsg'));
       }
-    } catch (err) {
-      console.error('General location capture error:', err);
+    } catch (e) {
+      console.error('Location error:', e);
       Alert.alert(t('errorTitle'), t('locationErrorMsg'));
     } finally {
       setLocLoading(false);
@@ -94,8 +168,8 @@ export default function CheckoutScreen({ navigation }: Props) {
       Alert.alert(t('errorTitle'), t('invalidMobileMsg'));
       return;
     }
-    if (mobile !== confirmMobile) {
-      Alert.alert(t('errorTitle'), t('mobileMismatchMsg'));
+    if (confirmMobile !== mobile) {
+      Alert.alert(t('errorTitle'), 'Contact numbers do not match. Please confirm your number.');
       return;
     }
     if (!address || address.trim().length < 5) {
@@ -139,7 +213,7 @@ export default function CheckoutScreen({ navigation }: Props) {
     }
   };
 
-  const isReady = mobile.length === 10 && mobile === confirmMobile && address.trim().length >= 5;
+  const isReady = mobile.length >= 10 && confirmMobile === mobile && address.trim().length >= 5;
 
   const subtotal = Number(totalAmount);
   const isFreeDelivery = fees.deliveryFeeEnabled && fees.freeDeliveryThresholdEnabled && (subtotal >= Number(fees.freeDeliveryThreshold));
@@ -166,25 +240,43 @@ export default function CheckoutScreen({ navigation }: Props) {
           value={mobile}
           onChangeText={setMobile}
         />
+        {mobile.length === 10 && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 }}>
+            <Ionicons name="checkmark-circle-outline" size={14} color="#22c55e" />
+            <Text style={styles.successText}>{t('mobileSuccess')}</Text>
+          </View>
+        )}
+      </View>
+
+      {/* Confirm Contact Number */}
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Ionicons name="shield-checkmark-outline" size={18} color="#a855f7" />
+          <Text style={styles.sectionTitle}>Confirm Contact Number</Text>
+        </View>
         <TextInput
-          style={[styles.input, { marginTop: 10 }]}
-          placeholder={t('confirmMobilePlaceholder')}
+          style={[
+            styles.input,
+            confirmMobile.length === 10 && confirmMobile === mobile && styles.inputSuccess,
+            confirmMobile.length === 10 && confirmMobile !== mobile && styles.inputError,
+          ]}
+          placeholder="Re-enter your mobile number"
           placeholderTextColor="#94a3b8"
           keyboardType="phone-pad"
           maxLength={10}
           value={confirmMobile}
           onChangeText={setConfirmMobile}
         />
-        {confirmMobile.length > 0 && mobile !== confirmMobile && (
+        {confirmMobile.length === 10 && confirmMobile === mobile && (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 }}>
-            <Ionicons name="alert-circle-outline" size={14} color="#ef4444" />
-            <Text style={styles.errorText}>{t('mobileMismatch')}</Text>
+            <Ionicons name="checkmark-circle" size={14} color="#22c55e" />
+            <Text style={styles.successText}>Numbers match ✓</Text>
           </View>
         )}
-        {mobile.length === 10 && mobile === confirmMobile && (
+        {confirmMobile.length > 0 && confirmMobile.length === 10 && confirmMobile !== mobile && (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 }}>
-            <Ionicons name="checkmark-circle-outline" size={14} color="#22c55e" />
-            <Text style={styles.successText}>{t('mobileSuccess')}</Text>
+            <Ionicons name="close-circle" size={14} color="#ef4444" />
+            <Text style={styles.errorText}>Numbers do not match</Text>
           </View>
         )}
       </View>
@@ -204,6 +296,12 @@ export default function CheckoutScreen({ navigation }: Props) {
           value={address}
           onChangeText={setAddress}
         />
+        {address.trim().length >= 5 && (
+          <TouchableOpacity style={styles.clearBtn} onPress={handleClearSaved}>
+            <Ionicons name="trash-outline" size={13} color="#94a3b8" />
+            <Text style={styles.clearBtnText}>Clear saved info</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Location */}
@@ -225,15 +323,17 @@ export default function CheckoutScreen({ navigation }: Props) {
           </View>
         ) : (
           <TouchableOpacity style={styles.locationBtn} onPress={handleGetLocation} disabled={locLoading}>
-            {locLoading
-              ? <ActivityIndicator color="#a855f7" />
-              : (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <Ionicons name="location-outline" size={16} color="#a855f7" />
-                  <Text style={styles.locationBtnText}>{t('allowLocation')}</Text>
-                </View>
-              )
-            }
+            {locLoading ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <ActivityIndicator size="small" color="#a855f7" />
+                <Text style={styles.locationBtnText}>Getting location...</Text>
+              </View>
+            ) : (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Ionicons name="location-outline" size={16} color="#a855f7" />
+                <Text style={styles.locationBtnText}>{t('allowLocation')}</Text>
+              </View>
+            )}
           </TouchableOpacity>
         )}
       </View>
@@ -323,15 +423,17 @@ export default function CheckoutScreen({ navigation }: Props) {
         disabled={placing || !isReady}
         activeOpacity={0.85}
       >
-        {placing
-          ? <ActivityIndicator color="#fff" />
-          : (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
-              <Ionicons name="paper-plane-outline" size={18} color="#ffffff" />
-              <Text style={styles.placeBtnText}>{t('placeOrder')}</Text>
-            </View>
-          )
-        }
+        {placing ? (
+          <View style={styles.placeBtnContent}>
+            <ActivityIndicator size="small" color="#ffffff" />
+            <Text style={styles.placeBtnText} numberOfLines={1}>{t('placeOrder')}</Text>
+          </View>
+        ) : (
+          <View style={styles.placeBtnContent}>
+            <Ionicons name="paper-plane-outline" size={18} color="#ffffff" />
+            <Text style={styles.placeBtnText} numberOfLines={1} ellipsizeMode="tail">{t('placeOrder')}</Text>
+          </View>
+        )}
       </TouchableOpacity>
 
       <View style={{ height: 40 }} />
@@ -352,6 +454,14 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0',
     borderRadius: 10, padding: 12, color: '#0f172a', fontSize: 15,
+  },
+  inputSuccess: {
+    borderColor: '#22c55e',
+    backgroundColor: '#f0fdf4',
+  },
+  inputError: {
+    borderColor: '#ef4444',
+    backgroundColor: '#fef2f2',
   },
   errorText: { color: '#ef4444', fontSize: 12 },
   successText: { color: '#22c55e', fontSize: 12, fontWeight: '600' },
@@ -376,10 +486,27 @@ const styles = StyleSheet.create({
   chargeValue: { fontSize: 13, color: '#475569', fontWeight: '500' },
   totalDivider: { height: 1, backgroundColor: '#f1f5f9', marginVertical: 10 },
   placeBtn: {
-    marginHorizontal: 16, marginTop: 8, backgroundColor: '#a855f7',
-    borderRadius: 14, paddingVertical: 18, alignItems: 'center', justifyContent: 'center',
-    shadowColor: '#a855f7', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4,
+    marginHorizontal: 20,
+    marginTop: 12,
+    backgroundColor: '#a855f7',
+    borderRadius: 14,
+    height: 52,
+    width: '90%',
+    maxWidth: '90%',
+    alignSelf: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    paddingHorizontal: 12,
+    shadowColor: '#a855f7',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   placeBtnDisabled: { backgroundColor: '#d8b4fe', shadowOpacity: 0 },
-  placeBtnText: { color: '#fff', fontSize: 17, fontWeight: '800' },
+  placeBtnContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', flex: 1 },
+  placeBtnText: { color: '#fff', fontSize: 16, fontWeight: '800', textAlign: 'center', flexShrink: 1, flexWrap: 'wrap' },
+  clearBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8, alignSelf: 'flex-end' },
+  clearBtnText: { fontSize: 12, color: '#94a3b8', fontWeight: '500' },
 });

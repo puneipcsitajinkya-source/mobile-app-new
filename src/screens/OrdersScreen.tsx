@@ -1,16 +1,18 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, FlatList,
-  StyleSheet, ActivityIndicator, RefreshControl, ScrollView,
+  StyleSheet, RefreshControl, ScrollView,
 } from 'react-native';
+import PremiumLoader from '../components/PremiumLoader';
 import { getOrdersByMobile, getSettings } from '../services/api';
 import { useLanguage } from '../hooks/useLanguage';
 import { Ionicons } from '@expo/vector-icons';
 import { useCart } from '../hooks/useCart';
+import { useNetwork } from '../hooks/useNetwork';
 
 interface OrderItem {
   productId: string;
-  name: string;
+  name: string | { en: string; mr: string };
   price: number;
   quantity: number;
   image?: string;
@@ -38,6 +40,7 @@ export default function OrdersScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [contactPhone, setContactPhone] = useState('9239321112');
+  const { onReconnect } = useNetwork();
 
   const fetchOrders = useCallback(async (isRefresh = false) => {
     if (isRefresh) {
@@ -77,6 +80,14 @@ export default function OrdersScreen() {
       })
       .catch((err) => console.log('Failed to fetch contact settings:', err));
   }, [fetchOrders]);
+
+  // Auto-reload when internet connection is restored
+  useEffect(() => {
+    const unsubscribe = onReconnect(() => {
+      fetchOrders(true);
+    });
+    return unsubscribe;
+  }, [onReconnect, fetchOrders]);
 
   const getStatusColor = (status: Order['status']) => {
     switch (status) {
@@ -126,11 +137,30 @@ export default function OrdersScreen() {
             <Text style={styles.orderId}>#{item._id.slice(-8).toUpperCase()}</Text>
             <Text style={styles.orderDate}>{orderDate}</Text>
           </View>
-          <View style={[styles.statusBadge, { backgroundColor: statusTheme.bg }]}>
-            <Text style={[styles.statusText, { color: statusTheme.text }]}>
-              {getStatusLabel(item.status)}
-            </Text>
-          </View>
+
+        </View>
+
+        <View style={styles.divider} />
+
+        {/* Tracking Timeline */}
+        <View style={styles.timelineContainer}>
+          {['pending', 'confirmed', 'out_for_delivery', 'delivered'].map((s, index) => {
+            const statuses = ['pending', 'confirmed', 'out_for_delivery', 'delivered'];
+            const labels = ['Order Placed', 'Confirmed', 'Out for Delivery', 'Delivered'];
+            const currentIndex = statuses.indexOf(item.status);
+            const isActive = index <= currentIndex;
+            const isLast = index === statuses.length - 1;
+
+            return (
+              <View key={s} style={styles.timelineStep}>
+                <View style={styles.timelineIconContainer}>
+                  <View style={[styles.timelineDot, isActive ? styles.timelineDotActive : null]} />
+                  {!isLast && <View style={[styles.timelineLine, isActive && index < currentIndex ? styles.timelineLineActive : null]} />}
+                </View>
+                <Text style={[styles.timelineText, isActive ? styles.timelineTextActive : null]}>{labels[index]}</Text>
+              </View>
+            );
+          })}
         </View>
 
         <View style={styles.divider} />
@@ -140,7 +170,9 @@ export default function OrdersScreen() {
           {item.items.map((prod, index) => (
             <View key={index} style={styles.itemRow}>
               <Text style={styles.itemName} numberOfLines={1}>
-                {prod.name}
+                {typeof prod.name === 'object' && prod.name !== null
+                  ? (prod.name as any).en || (prod.name as any).mr || 'Product'
+                  : String(prod.name || 'Product')}
               </Text>
               <Text style={styles.itemQty}>× {prod.quantity}</Text>
               <Text style={styles.itemPrice}>₹{prod.price * prod.quantity}</Text>
@@ -197,7 +229,7 @@ export default function OrdersScreen() {
 
       {/* Orders List */}
       {loading ? (
-        <ActivityIndicator size="large" color="#a855f7" style={styles.loader} />
+        <PremiumLoader message="Loading orders" icon="receipt-outline" />
       ) : orders.length === 0 ? (
         <ScrollView
           contentContainerStyle={styles.emptyContainer}
@@ -225,7 +257,7 @@ export default function OrdersScreen() {
         </ScrollView>
       ) : (
         <FlatList
-          data={orders.slice(0, 1)}
+          data={orders.slice(0, 10)}
           keyExtractor={(item) => item._id}
           renderItem={renderOrderItem}
           contentContainerStyle={styles.listContainer}
@@ -266,6 +298,15 @@ const styles = StyleSheet.create({
   orderDate: { fontSize: 12, color: '#94a3b8', marginTop: 2 },
   statusBadge: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
   statusText: { fontSize: 12, fontWeight: '700', textTransform: 'capitalize' },
+  timelineContainer: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 10, marginVertical: 12 },
+  timelineStep: { flex: 1, alignItems: 'center' },
+  timelineIconContainer: { flexDirection: 'row', alignItems: 'center', width: '100%' },
+  timelineDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#cbd5e1', zIndex: 1 },
+  timelineDotActive: { backgroundColor: '#a855f7' },
+  timelineLine: { flex: 1, height: 2, backgroundColor: '#e2e8f0', marginLeft: -2, marginRight: -2 },
+  timelineLineActive: { backgroundColor: '#a855f7' },
+  timelineText: { fontSize: 10, color: '#94a3b8', marginTop: 6, textAlign: 'center', width: 60, marginLeft: -24 },
+  timelineTextActive: { color: '#0f172a', fontWeight: '700' },
   divider: { height: 1, backgroundColor: '#f1f5f9', marginVertical: 12 },
   itemsSection: { gap: 8 },
   itemRow: { flexDirection: 'row', alignItems: 'center' },

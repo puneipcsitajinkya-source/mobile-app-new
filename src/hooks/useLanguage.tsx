@@ -1,6 +1,8 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getSettings } from '../services/api';
 
-export type Language = 'en' | 'mr';
+export type Language = 'en' | 'mr' | 'hi';
 
 interface LanguageContextType {
   language: Language;
@@ -9,12 +11,13 @@ interface LanguageContextType {
   t: (key: string) => string;
   tProduct: (name: { en: string; mr: string } | string | undefined) => string;
   tCategory: (catName: string) => string;
+  translating: boolean;
 }
 
-const translations: Record<Language, Record<string, string>> = {
+const translations: Record<'en' | 'mr', Record<string, string>> = {
   en: {
-    appTitle: 'FirstMart',
-    appSub: '⭐ 4.8 (5k+ Ratings)',
+    appTitle: 'Blinkit',
+    appSub: 'Delivery in 10 minutes',
     searchPlaceholder: 'Search products...',
     allCategory: 'All',
     addedToCart: 'Added',
@@ -66,8 +69,8 @@ const translations: Record<Language, Record<string, string>> = {
     orderStatus: 'Status',
   },
   mr: {
-    appTitle: 'फर्स्टमार्ट',
-    appSub: '⭐ 4.8 (5k+ रेटिंग)',
+    appTitle: 'Blinkit',
+    appSub: '१० मिनिटांत डिलिव्हरी',
     searchPlaceholder: 'उत्पादने शोधा...',
     allCategory: 'सर्व',
     addedToCart: 'जोडले',
@@ -120,63 +123,326 @@ const translations: Record<Language, Record<string, string>> = {
   },
 };
 
-const categoryTranslations: Record<Language, Record<string, string>> = {
+const categoryTranslations: Record<'en' | 'mr', Record<string, string>> = {
   en: {
-    'Vegetables': 'Vegetables',
-    'Fruits': 'Fruits',
-    'Leafy Greens': 'Leafy Greens',
-    'Roots & Tubers': 'Roots & Tubers',
-    'Herbs': 'Herbs',
+    'Dairy & Breakfast': 'Dairy & Breakfast',
+    'Snacks & Munchies': 'Snacks & Munchies',
+    'Cold Drinks & Juices': 'Cold Drinks & Juices',
+    'Sweet Tooth': 'Sweet Tooth',
+    'Fruits & Vegetables': 'Fruits & Vegetables',
+    'Instant & Frozen Food': 'Instant & Frozen Food',
+    'Meat, Fish & Eggs': 'Meat, Fish & Eggs',
+    'Bakery & Biscuits': 'Bakery & Biscuits',
+    'Atta, Rice & Dal': 'Atta, Rice & Dal',
+    'Masala, Oil & More': 'Masala, Oil & More',
   },
   mr: {
-    'Vegetables': 'भाज्या',
-    'Fruits': 'फळे',
-    'Leafy Greens': 'पालेभाज्या',
-    'Roots & Tubers': 'कंदमुळे',
-    'Herbs': 'औषधी वनस्पती',
+    'Dairy & Breakfast': 'डेअरी आणि नाश्ता',
+    'Snacks & Munchies': 'स्नॅक्स',
+    'Cold Drinks & Juices': 'थंड पेये',
+    'Sweet Tooth': 'मिठाई',
+    'Fruits & Vegetables': 'फळे आणि भाज्या',
+    'Instant & Frozen Food': 'इन्स्टंट आणि फ्रोझन फूड',
+    'Meat, Fish & Eggs': 'मांस, मासे आणि अंडी',
+    'Bakery & Biscuits': 'बेकरी आणि बिस्किटे',
+    'Atta, Rice & Dal': 'आटा, तांदूळ आणि डाळी',
+    'Masala, Oil & More': 'मसाले आणि तेल',
   },
 };
+
+async function translateText(text: string, targetLang: string): Promise<string> {
+  if (!text || text.trim() === '') return '';
+  try {
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=${targetLang}&dt=t&q=${encodeURIComponent(text)}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Google translate status ${response.status}`);
+    }
+    const data = await response.json();
+    if (data && data[0]) {
+      const translated = data[0].map((part: any) => part[0]).join('');
+      return translated;
+    }
+    return text;
+  } catch (error) {
+    console.error(`Translation error for "${text}":`, error);
+    return text;
+  }
+}
+
+async function translateBatch(texts: string[], targetLang: string): Promise<string[]> {
+  try {
+    const combined = texts.join('\n\n');
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=${targetLang}&dt=t&q=${encodeURIComponent(combined)}`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error();
+    const data = await response.json();
+    if (data && data[0]) {
+      const translatedCombined = data[0].map((part: any) => part[0]).join('');
+      const parts = translatedCombined.split(/\n\n+/).map((s: string) => s.trim());
+      if (parts.length === texts.length) {
+        return parts;
+      }
+      console.warn(`Length mismatch: got ${parts.length}, expected ${texts.length}. Splitting by single newline...`);
+      const singleParts = translatedCombined.split('\n').filter((s: string) => s.trim() !== '').map((s: string) => s.trim());
+      if (singleParts.length === texts.length) {
+        return singleParts;
+      }
+    }
+  } catch (e) {
+    console.error('Batch translation failed, falling back to individual', e);
+  }
+
+  const results: string[] = [];
+  for (const text of texts) {
+    const res = await translateText(text, targetLang);
+    results.push(res);
+    await new Promise(r => setTimeout(r, 20));
+  }
+  return results;
+}
 
 const LanguageContext = createContext<LanguageContextType | null>(null);
 
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
-  const [language, setLanguage] = useState<Language>('en');
+  const [language, setLanguageState] = useState<Language>('en');
+  const [translating, setTranslating] = useState<boolean>(false);
+  const [dynamicTranslations, setDynamicTranslations] = useState<Record<Language, Record<string, string>>>({
+    en: {},
+    mr: {},
+    hi: {},
+  });
+
+  useEffect(() => {
+    const init = async () => {
+      try {
+        const savedLang = await AsyncStorage.getItem('veggie_app_language');
+        const savedCache = await AsyncStorage.getItem('veggie_app_dynamic_translations_v2');
+        
+        let cacheObj: Record<Language, Record<string, string>> = { en: {}, mr: {}, hi: {} };
+        if (savedCache) {
+          cacheObj = JSON.parse(savedCache);
+        }
+
+        cacheObj.en = cacheObj.en || {};
+        cacheObj.mr = cacheObj.mr || {};
+        cacheObj.hi = cacheObj.hi || {};
+
+        setDynamicTranslations(cacheObj);
+
+        if (savedLang && (savedLang === 'en' || savedLang === 'mr' || savedLang === 'hi')) {
+          setLanguageState(savedLang as Language);
+        } else {
+          // No local preference, fetch default language from backend settings
+          try {
+            const settingsRes = await getSettings();
+            const backendDefaultLang = settingsRes.data?.defaultLanguage;
+            if (backendDefaultLang && (backendDefaultLang === 'en' || backendDefaultLang === 'mr' || backendDefaultLang === 'hi')) {
+              if (backendDefaultLang !== 'en') {
+                // Translate the app keys for the default language if not already cached
+                const englishKeys = Object.keys(translations.en);
+                const existingCache = cacheObj[backendDefaultLang as Language] || {};
+                const translatedCount = englishKeys.filter(k => existingCache[k]).length;
+                const isTranslated = translatedCount >= englishKeys.length * 0.8;
+
+                if (!isTranslated) {
+                  const englishTexts = englishKeys.map(k => translations.en[k]);
+                  const translatedTexts = await translateBatch(englishTexts, backendDefaultLang);
+                  
+                  const newCacheForLang: Record<string, string> = { ...existingCache };
+                  englishKeys.forEach((key, index) => {
+                    newCacheForLang[key] = translatedTexts[index] || translations.en[key];
+                  });
+
+                  cacheObj[backendDefaultLang as Language] = newCacheForLang;
+                  setDynamicTranslations({ ...cacheObj });
+                  await AsyncStorage.setItem('veggie_app_dynamic_translations_v2', JSON.stringify(cacheObj));
+                }
+              }
+              setLanguageState(backendDefaultLang as Language);
+            }
+          } catch (apiErr) {
+            console.warn('Failed to fetch default language from backend settings', apiErr);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load language/cache from storage', err);
+      }
+    };
+    init();
+  }, []);
+
+  const setLanguage = useCallback(async (newLang: Language) => {
+    if (newLang === 'en') {
+      setLanguageState('en');
+      await AsyncStorage.setItem('veggie_app_language', 'en');
+      return;
+    }
+
+    const englishKeys = Object.keys(translations.en);
+    const existingCache = dynamicTranslations[newLang] || {};
+    
+    const translatedCount = englishKeys.filter(k => existingCache[k]).length;
+    const isTranslated = translatedCount >= englishKeys.length * 0.8;
+
+    if (isTranslated) {
+      setLanguageState(newLang);
+      await AsyncStorage.setItem('veggie_app_language', newLang);
+      return;
+    }
+
+    setTranslating(true);
+    try {
+      const englishTexts = englishKeys.map(k => translations.en[k]);
+      const translatedTexts = await translateBatch(englishTexts, newLang);
+      
+      const newCacheForLang: Record<string, string> = { ...existingCache };
+      englishKeys.forEach((key, index) => {
+        newCacheForLang[key] = translatedTexts[index] || translations.en[key];
+      });
+
+      const updatedCache = {
+        ...dynamicTranslations,
+        [newLang]: newCacheForLang
+      };
+      
+      setDynamicTranslations(updatedCache);
+      await AsyncStorage.setItem('veggie_app_dynamic_translations_v2', JSON.stringify(updatedCache));
+      setLanguageState(newLang);
+      await AsyncStorage.setItem('veggie_app_language', newLang);
+    } catch (e) {
+      console.error('Failed to translate app static keys', e);
+      setLanguageState(newLang);
+    } finally {
+      setTranslating(false);
+    }
+  }, [dynamicTranslations]);
 
   const toggleLanguage = useCallback(() => {
-    setLanguage((prev) => (prev === 'en' ? 'mr' : 'en'));
-  }, []);
+    const nextLangMap: Record<Language, Language> = {
+      en: 'hi',
+      hi: 'mr',
+      mr: 'en'
+    };
+    setLanguage(nextLangMap[language]);
+  }, [language, setLanguage]);
 
   const t = useCallback(
     (key: string): string => {
-      return translations[language][key] || key;
+      if (language === 'en') {
+        return translations.en[key] || key;
+      }
+
+      if (dynamicTranslations[language] && dynamicTranslations[language][key]) {
+        return dynamicTranslations[language][key];
+      }
+
+      if (language === 'mr' && translations.mr[key]) {
+        return translations.mr[key];
+      }
+
+      return translations.en[key] || key;
     },
-    [language]
+    [language, dynamicTranslations]
   );
+
+  const translateOnTheFly = useCallback(async (text: string, targetLang: Language) => {
+    if (!text || targetLang === 'en') return;
+    
+    if (dynamicTranslations[targetLang] && dynamicTranslations[targetLang][text]) {
+      return;
+    }
+
+    try {
+      const translated = await translateText(text, targetLang);
+      if (translated && translated !== text) {
+        setDynamicTranslations(prev => {
+          const updated = {
+            ...prev,
+            [targetLang]: {
+              ...prev[targetLang],
+              [text]: translated
+            }
+          };
+          AsyncStorage.setItem('veggie_app_dynamic_translations_v2', JSON.stringify(updated)).catch(console.error);
+          return updated;
+        });
+      }
+    } catch (e) {
+      console.error('On-the-fly translation failed', e);
+    }
+  }, [dynamicTranslations]);
 
   const tProduct = useCallback(
     (name: { en: string; mr: string } | string | undefined): string => {
       if (!name) return '';
-      if (typeof name === 'string') return name;
-      return name[language] || name.en || name.mr || '';
+      
+      // Safety: if name is not a string or known object shape, convert to string
+      if (typeof name !== 'string' && typeof name !== 'object') {
+        return String(name);
+      }
+      
+      let englishText = '';
+      let presetMarathiText = '';
+
+      if (typeof name === 'string') {
+        englishText = name;
+      } else if (name !== null && typeof name === 'object') {
+        englishText = (name as any).en || '';
+        presetMarathiText = (name as any).mr || '';
+      }
+
+      if (language === 'en') {
+        return englishText;
+      }
+
+      if (language === 'mr' && presetMarathiText) {
+        return presetMarathiText;
+      }
+
+      const cached = dynamicTranslations[language]?.[englishText];
+      if (cached) {
+        return cached;
+      }
+
+      translateOnTheFly(englishText, language);
+
+      return language === 'mr' && presetMarathiText ? presetMarathiText : englishText;
     },
-    [language]
+    [language, dynamicTranslations, translateOnTheFly]
   );
 
   const tCategory = useCallback(
     (catName: string): string => {
       if (!catName) return '';
-      const translationsForLang = categoryTranslations[language];
-      const matchKey = Object.keys(translationsForLang).find(
-        (key) => key.toLowerCase() === catName.toLowerCase()
-      );
-      return matchKey ? translationsForLang[matchKey] : catName;
+      
+      if (language === 'en') {
+        return catName;
+      }
+
+      if (language === 'mr') {
+        const translationsForLang = categoryTranslations.mr;
+        const matchKey = Object.keys(translationsForLang).find(
+          (key) => key.toLowerCase() === catName.toLowerCase()
+        );
+        if (matchKey) return translationsForLang[matchKey];
+      }
+
+      const cached = dynamicTranslations[language]?.[catName];
+      if (cached) {
+        return cached;
+      }
+
+      translateOnTheFly(catName, language);
+
+      return catName;
     },
-    [language]
+    [language, dynamicTranslations, translateOnTheFly]
   );
 
   return (
     <LanguageContext.Provider
-      value={{ language, setLanguage, toggleLanguage, t, tProduct, tCategory }}
+      value={{ language, setLanguage, toggleLanguage, t, tProduct, tCategory, translating }}
     >
       {children}
     </LanguageContext.Provider>

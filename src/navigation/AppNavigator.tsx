@@ -9,11 +9,13 @@ import CartScreen from '../screens/CartScreen';
 import CheckoutScreen from '../screens/CheckoutScreen';
 import SuccessScreen from '../screens/SuccessScreen';
 import OrdersScreen from '../screens/OrdersScreen';
+import CategoryProductsScreen from '../screens/CategoryProductsScreen';
 import { useCart } from '../hooks/useCart';
 
 export type RootStackParamList = {
   Main: undefined;
   ProductDetail: { productId: string };
+  CategoryProducts: { categoryName: string };
   Checkout: undefined;
   Success: { orderId: string };
 };
@@ -102,6 +104,7 @@ export default function AppNavigator() {
       >
         <Stack.Screen name="Main" component={MainTabs} options={{ headerShown: false }} />
         <Stack.Screen name="ProductDetail" component={ProductDetailScreen} options={{ title: 'Product Details' }} />
+        <Stack.Screen name="CategoryProducts" component={CategoryProductsScreen} options={({ route }) => ({ title: route.params.categoryName })} />
         <Stack.Screen name="Checkout" component={CheckoutScreen} options={{ title: 'Checkout' }} />
         <Stack.Screen name="Success" component={SuccessScreen} options={{ headerShown: false }} />
       </Stack.Navigator>

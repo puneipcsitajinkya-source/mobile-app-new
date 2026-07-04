@@ -4,6 +4,7 @@ export interface CartItem {
   _id: string;
   name: { en: string; mr: string } | string;
   price: number;
+  mrp?: number;
   image?: string;
   quantity: number;
 }
@@ -16,6 +17,8 @@ interface CartContextType {
   decreaseQty: (id: string) => void;
   clearCart: () => void;
   totalAmount: number;
+  totalMrp: number;
+  totalSavings: number;
   totalItems: number;
   latestOrder: any | null;
   setLatestOrder: (order: any | null) => void;
@@ -60,11 +63,13 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const clearCart = useCallback(() => setItems([]), []);
 
   const totalAmount = items.reduce((sum, i) => sum + i.price * i.quantity, 0);
+  const totalMrp = items.reduce((sum, i) => sum + ((i.mrp && i.mrp > i.price) ? i.mrp : i.price) * i.quantity, 0);
+  const totalSavings = totalMrp - totalAmount;
   const totalItems = items.reduce((sum, i) => sum + i.quantity, 0);
 
   return (
     <CartContext.Provider
-      value={{ items, addToCart, removeFromCart, increaseQty, decreaseQty, clearCart, totalAmount, totalItems, latestOrder, setLatestOrder }}
+      value={{ items, addToCart, removeFromCart, increaseQty, decreaseQty, clearCart, totalAmount, totalMrp, totalSavings, totalItems, latestOrder, setLatestOrder }}
     >
       {children}
     </CartContext.Provider>
