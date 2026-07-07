@@ -31,6 +31,59 @@ interface Product {
   subcategory?: string;
 }
 
+interface ProductCardProps {
+  item: Product;
+  qty: number;
+  onPress: (productId: string) => void;
+  onAdd: (product: Product) => void;
+  tProduct: (name: Product['name']) => string;
+}
+
+const ProductCard = React.memo(function ProductCard({ item, qty, onPress, onAdd, tProduct }: ProductCardProps) {
+  return (
+    <TouchableOpacity
+      style={styles.card}
+      onPress={() => onPress(item._id)}
+      activeOpacity={0.9}
+    >
+      <View style={styles.cardImgContainer}>
+        <PremiumImage
+          uri={item.image}
+          style={styles.cardImg}
+          iconName="leaf-outline"
+          iconSize={32}
+        />
+        {(item.discount ?? 0) > 0 && (
+          <View style={styles.discountBadge}>
+            <Text style={styles.discountText}>{item.discount}% OFF</Text>
+          </View>
+        )}
+      </View>
+      <View style={styles.cardBody}>
+        <Text style={styles.cardUnit}>{item.unit || '1 pc'}</Text>
+        <Text style={styles.cardName} numberOfLines={2}>{tProduct(item.name)}</Text>
+        <View style={styles.priceRow}>
+          <View>
+            <Text style={styles.cardPrice}>₹{item.price}</Text>
+            {item.mrp != null && item.mrp > item.price && (
+              <Text style={styles.cardMrp}>₹{item.mrp}</Text>
+            )}
+          </View>
+          <TouchableOpacity
+            style={[styles.addBtn, qty > 0 && styles.addedBtn]}
+            onPress={() => onAdd(item)}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.addBtnText, qty > 0 && styles.addedBtnText]}>
+              {qty > 0 ? qty : 'ADD'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+});
+
 export default function CategoryProductsScreen({ navigation, route }: Props) {
   const { categoryName } = route.params;
   const [products, setProducts] = useState<Product[]>([]);
@@ -70,60 +123,31 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
     return filtered;
   }, [products, selectedSubcategory]);
 
-  const getProductQty = (id: string) => {
+  const getProductQty = useCallback((id: string) => {
     const item = cart.find(c => c._id === id);
     return item ? item.quantity : 0;
-  };
+  }, [cart]);
 
-  const handleAdd = (product: Product) => {
+  const handleAdd = useCallback((product: Product) => {
     addToCart({ _id: product._id, name: product.name, price: product.price, image: product.image, mrp: product.mrp });
-  };
+  }, [addToCart]);
 
-  const renderProduct = ({ item }: { item: Product }) => {
+  const handleProductPress = useCallback((productId: string) => {
+    navigation.navigate('ProductDetail', { productId });
+  }, [navigation]);
+
+  const renderProduct = useCallback(({ item }: { item: Product }) => {
     const qty = getProductQty(item._id);
     return (
-      <TouchableOpacity
-        style={styles.card}
-        onPress={() => navigation.navigate('ProductDetail', { productId: item._id })}
-        activeOpacity={0.9}
-      >
-        <View style={styles.cardImgContainer}>
-          <PremiumImage
-            uri={item.image}
-            style={styles.cardImg}
-            iconName="leaf-outline"
-            iconSize={32}
-          />
-          {(item.discount ?? 0) > 0 && (
-            <View style={styles.discountBadge}>
-              <Text style={styles.discountText}>{item.discount}% OFF</Text>
-            </View>
-          )}
-        </View>
-        <View style={styles.cardBody}>
-          <Text style={styles.cardUnit}>{item.unit || '1 pc'}</Text>
-          <Text style={styles.cardName} numberOfLines={2}>{tProduct(item.name)}</Text>
-          <View style={styles.priceRow}>
-            <View>
-              <Text style={styles.cardPrice}>₹{item.price}</Text>
-              {item.mrp != null && item.mrp > item.price && (
-                <Text style={styles.cardMrp}>₹{item.mrp}</Text>
-              )}
-            </View>
-            <TouchableOpacity
-              style={[styles.addBtn, qty > 0 && styles.addedBtn]}
-              onPress={() => handleAdd(item)}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.addBtnText, qty > 0 && styles.addedBtnText]}>
-                {qty > 0 ? qty : 'ADD'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </TouchableOpacity>
+      <ProductCard
+        item={item}
+        qty={qty}
+        onPress={handleProductPress}
+        onAdd={handleAdd}
+        tProduct={tProduct}
+      />
     );
-  };
+  }, [getProductQty, handleAdd, handleProductPress, tProduct]);
 
   if (loading) return <View style={styles.loaderContainer}><ActivityIndicator size="large" color="#a855f7" /></View>;
 
@@ -156,9 +180,15 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
         data={filteredProducts}
         renderItem={renderProduct}
         keyExtractor={item => item._id}
+        extraData={cart}
         numColumns={2}
         contentContainerStyle={styles.grid}
         showsVerticalScrollIndicator={false}
+        initialNumToRender={12}
+        maxToRenderPerBatch={8}
+        windowSize={7}
+        removeClippedSubviews
+        updateCellsBatchingPeriod={50}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor="#a855f7" />}
         ListEmptyComponent={
           <View style={styles.emptyState}>

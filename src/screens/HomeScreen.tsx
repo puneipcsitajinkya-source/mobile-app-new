@@ -1,8 +1,8 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
   View, Text, FlatList, TextInput, TouchableOpacity,
   Image, StyleSheet, ScrollView, RefreshControl, Dimensions,
-  Platform, Modal, ActivityIndicator
+  Platform, Modal, ActivityIndicator, Animated
 } from 'react-native';
 import PremiumLoader from '../components/PremiumLoader';
 import PremiumImage from '../components/PremiumImage';
@@ -39,6 +39,7 @@ interface Category {
 }
 
 const { width } = Dimensions.get('window');
+const PROMO_WIDTH = width - 48;
 
 export default function HomeScreen({ navigation }: Props) {
   const [products, setProducts] = useState<Product[]>([]);
@@ -49,6 +50,9 @@ export default function HomeScreen({ navigation }: Props) {
   const { addToCart, items: cart, totalItems, totalAmount: cartTotal } = useCart();
   const [added, setAdded] = useState<string | null>(null);
   const [langModalVisible, setLangModalVisible] = useState(false);
+  const [activePromo, setActivePromo] = useState(0);
+  const promoScrollX = useRef(new Animated.Value(0)).current;
+  const promoRef = useRef<FlatList<any> | null>(null);
   const { language, setLanguage, translating, t, tProduct, tCategory } = useLanguage();
   const { onReconnect } = useNetwork();
 
@@ -117,13 +121,48 @@ export default function HomeScreen({ navigation }: Props) {
     return item ? item.quantity : 0;
   };
 
-  const renderProduct = (item: Product) => {
+  const promoItems = [
+    {
+      title: 'Super Fast Delivery',
+      subtitle: 'Fresh groceries in minutes',
+      badge: 'Priority',
+      image: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&q=80&w=1000',
+      backgroundColor: '#7c3aed',
+    },
+    {
+      title: 'Premium Savings',
+      subtitle: 'Get up to 15% off on daily essentials',
+      badge: 'Limited Offer',
+      image: 'https://images.unsplash.com/photo-1514996937319-344454492b37?auto=format&fit=crop&q=80&w=1000',
+      backgroundColor: '#0f766e',
+    },
+    {
+      title: 'New Arrivals',
+      subtitle: 'Exclusive store deals just for you',
+      badge: 'Just In',
+      image: 'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&q=80&w=1000',
+      backgroundColor: '#f59e0b',
+    },
+  ];
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const nextIndex = (activePromo + 1) % promoItems.length;
+      promoRef.current?.scrollToOffset({ offset: nextIndex * PROMO_WIDTH, animated: true });
+    }, 4500);
+    return () => clearInterval(interval);
+  }, [activePromo]);
+
+  const handleProductPress = useCallback((productId: string) => {
+    navigation.navigate('ProductDetail', { productId });
+  }, [navigation]);
+
+  const renderProduct = useCallback(({ item }: { item: Product }) => {
     const qty = getProductQty(item._id);
     return (
       <TouchableOpacity
-        key={item._id}
         style={styles.card}
-        onPress={() => navigation.navigate('ProductDetail', { productId: item._id })}
+        onPress={() => handleProductPress(item._id)}
         activeOpacity={0.9}
       >
         <View style={styles.cardImgContainer}>
@@ -163,7 +202,7 @@ export default function HomeScreen({ navigation }: Props) {
         </View>
       </TouchableOpacity>
     );
-  };
+  }, [getProductQty, handleAdd, handleProductPress, tProduct]);
 
   if (loading) {
     return <PremiumLoader message="Loading fresh items..." icon="leaf" />;
@@ -215,14 +254,64 @@ export default function HomeScreen({ navigation }: Props) {
       >
         {/* PROMO BANNER */}
         {!search && (
-          <View style={styles.promoContainer}>
-            <Image
-              source={{ uri: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&q=80&w=1000' }}
-              style={styles.promoImg}
+          <View style={styles.promoWrapper}>
+            <Animated.FlatList
+              ref={promoRef}
+              data={promoItems}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              snapToInterval={PROMO_WIDTH}
+              decelerationRate="fast"
+              pagingEnabled
+              contentContainerStyle={styles.promoScrollContent}
+              onScroll={Animated.event(
+                [{ nativeEvent: { contentOffset: { x: promoScrollX } } }],
+                { useNativeDriver: true }
+              )}
+              onMomentumScrollEnd={(event) => {
+                const index = Math.round(event.nativeEvent.contentOffset.x / PROMO_WIDTH);
+                setActivePromo(index);
+              }}
+              scrollEventThrottle={16}
+              keyExtractor={(item) => item.title}
+              renderItem={({ item, index }) => {
+                const inputRange = [
+                  (index - 1) * PROMO_WIDTH,
+                  index * PROMO_WIDTH,
+                  (index + 1) * PROMO_WIDTH,
+                ];
+                const scale = promoScrollX.interpolate({
+                  inputRange,
+                  outputRange: [0.94, 1, 0.94],
+                  extrapolate: 'clamp',
+                });
+                const opacity = promoScrollX.interpolate({
+                  inputRange,
+                  outputRange: [0.8, 1, 0.8],
+                  extrapolate: 'clamp',
+                });
+                return (
+                  <Animated.View style={[styles.promoCard, { width: PROMO_WIDTH, transform: [{ scale }], opacity, backgroundColor: item.backgroundColor }]}>
+                    <Image source={{ uri: item.image }} style={styles.promoImg} />
+                    <View style={styles.promoOverlay} />
+                    <View style={styles.promoContent}>
+                      <View style={styles.promoBadge}>
+                        <Text style={styles.promoBadgeText}>{item.badge}</Text>
+                      </View>
+                      <Text style={styles.promoTitle}>{item.title}</Text>
+                      <Text style={styles.promoSub}>{item.subtitle}</Text>
+                    </View>
+                  </Animated.View>
+                );
+              }}
             />
-            <View style={styles.promoOverlay}>
-              <Text style={styles.promoTitle}>Super Fast Delivery</Text>
-              <Text style={styles.promoSub}>Fresh groceries in minutes</Text>
+            <View style={styles.promoDotContainer}>
+              {promoItems.map((_, index) => (
+                <View
+                  key={index}
+                  style={[styles.promoDot, index === activePromo && styles.promoDotActive]}
+                />
+              ))}
             </View>
           </View>
         )}
@@ -266,9 +355,19 @@ export default function HomeScreen({ navigation }: Props) {
                 </TouchableOpacity>
               )}
             </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalScroll}>
-              {group.products.map(p => renderProduct(p))}
-            </ScrollView>
+            <FlatList
+              horizontal
+              data={group.products}
+              renderItem={renderProduct}
+              keyExtractor={(item) => item._id}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.horizontalScroll}
+              initialNumToRender={6}
+              maxToRenderPerBatch={4}
+              windowSize={5}
+              removeClippedSubviews
+              extraData={cart}
+            />
           </View>
         ))}
 
@@ -421,14 +520,62 @@ const styles = StyleSheet.create({
   searchRow: { backgroundColor: '#ffffff', borderRadius: 12, overflow: 'hidden' },
   searchBox: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, height: 44 },
   searchInput: { flex: 1, fontSize: 15, color: '#0f172a' },
-  promoContainer: { margin: 16, height: 120, borderRadius: 12, overflow: 'hidden', backgroundColor: '#e2e8f0' },
-  promoImg: { width: '100%', height: '100%', resizeMode: 'cover' },
+  promoWrapper: { marginTop: 16, marginBottom: 14 },
+  promoScrollContent: { paddingHorizontal: 16 },
+  promoCard: {
+    height: 128,
+    borderRadius: 20,
+    marginRight: 16,
+    overflow: 'hidden',
+    backgroundColor: '#7c3aed',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.1,
+    shadowRadius: 20,
+    elevation: 6,
+  },
+  promoImg: { width: '100%', height: '100%', resizeMode: 'cover', position: 'absolute' },
   promoOverlay: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', padding: 16
+    backgroundColor: 'rgba(0,0,0,0.35)',
   },
-  promoTitle: { color: '#ffffff', fontSize: 20, fontWeight: '800' },
-  promoSub: { color: '#f8fafc', fontSize: 13, marginTop: 4 },
+  promoContent: {
+    position: 'absolute', left: 18, bottom: 18, right: 18,
+  },
+  promoBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
+    marginBottom: 10,
+  },
+  promoBadgeText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  promoTitle: { color: '#ffffff', fontSize: 22, fontWeight: '800' },
+  promoSub: { color: '#f8fafc', fontSize: 14, marginTop: 6, lineHeight: 20 },
+  promoDotContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  promoDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'rgba(148, 163, 184, 0.5)',
+    marginHorizontal: 4,
+  },
+  promoDotActive: {
+    backgroundColor: '#ffffff',
+    width: 18,
+  },
   categoryGridContainer: {
     flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 8, marginBottom: 16
   },
@@ -564,7 +711,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   translatingOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(255, 255, 255, 0.9)',
     zIndex: 1000,
     justifyContent: 'center',

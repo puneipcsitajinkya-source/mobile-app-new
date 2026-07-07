@@ -50,7 +50,7 @@ function MainTabs() {
         },
         tabBarActiveTintColor: '#a855f7',
         tabBarInactiveTintColor: '#64748b',
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '700', marginTop: 2 },
+        tabBarLabelStyle: { fontSize: 10, fontWeight: '600', marginTop: 2 },
       }}
     >
       <Tab.Screen

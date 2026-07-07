@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, FlatList,
   StyleSheet, RefreshControl, ScrollView,
@@ -27,7 +27,7 @@ interface Order {
   deliveryFee: number;
   handlingFee: number;
   totalAmount: number;
-  status: 'pending' | 'confirmed' | 'out_for_delivery' | 'delivered';
+  status: 'pending' | 'confirmed' | 'out_for_delivery' | 'delivered' | 'closed';
   address?: string;
   createdAt: string;
 }
@@ -99,6 +99,8 @@ export default function OrdersScreen() {
         return { bg: '#eff6ff', text: '#3b82f6' }; // Blue
       case 'delivered':
         return { bg: '#f0fdf4', text: '#22c55e' }; // Green
+      case 'closed':
+        return { bg: '#fef2f2', text: '#dc2626' }; // Red
       default:
         return { bg: '#f1f5f9', text: '#64748b' };
     }
@@ -114,12 +116,16 @@ export default function OrdersScreen() {
         return 'Out for Delivery';
       case 'delivered':
         return 'Delivered';
+      case 'closed':
+        return 'Closed';
       default:
         return status;
     }
   };
 
-  const renderOrderItem = ({ item }: { item: Order }) => {
+  const visibleOrders = useMemo(() => orders.slice(0, 10), [orders]);
+
+  const renderOrderItem = useCallback(({ item }: { item: Order }) => {
     const statusTheme = getStatusColor(item.status);
     const orderDate = new Date(item.createdAt).toLocaleDateString('en-IN', {
       day: 'numeric',
@@ -144,9 +150,9 @@ export default function OrdersScreen() {
 
         {/* Tracking Timeline */}
         <View style={styles.timelineContainer}>
-          {['pending', 'confirmed', 'out_for_delivery', 'delivered'].map((s, index) => {
-            const statuses = ['pending', 'confirmed', 'out_for_delivery', 'delivered'];
-            const labels = ['Order Placed', 'Confirmed', 'Out for Delivery', 'Delivered'];
+          {[ 'pending', 'confirmed', 'out_for_delivery', 'delivered', 'closed' ].map((s, index) => {
+            const statuses = ['pending', 'confirmed', 'out_for_delivery', 'delivered', 'closed'];
+            const labels = ['Order Placed', 'Confirmed', 'Out for Delivery', 'Delivered', 'Closed'];
             const currentIndex = statuses.indexOf(item.status);
             const isActive = index <= currentIndex;
             const isLast = index === statuses.length - 1;
@@ -210,7 +216,7 @@ export default function OrdersScreen() {
         </View>
       </View>
     );
-  };
+  }, []);
 
   return (
     <View style={styles.container}>
@@ -257,11 +263,15 @@ export default function OrdersScreen() {
         </ScrollView>
       ) : (
         <FlatList
-          data={orders.slice(0, 10)}
+          data={visibleOrders}
           keyExtractor={(item) => item._id}
           renderItem={renderOrderItem}
           contentContainerStyle={styles.listContainer}
           showsVerticalScrollIndicator={false}
+          initialNumToRender={5}
+          maxToRenderPerBatch={5}
+          windowSize={5}
+          removeClippedSubviews
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={() => fetchOrders(true)} tintColor="#a855f7" />
           }

@@ -17,6 +17,7 @@ import { RootStackParamList } from '../navigation/AppNavigator';
 import { useCart } from '../hooks/useCart';
 import { placeOrder, getSettings } from '../services/api';
 import { useLanguage } from '../hooks/useLanguage';
+import { useNetwork } from '../hooks/useNetwork';
 import { Ionicons } from '@expo/vector-icons';
 
 const STORAGE_MOBILE_KEY = '@checkout_mobile';
@@ -45,6 +46,8 @@ export default function CheckoutScreen({ navigation }: Props) {
     freeDeliveryThreshold: 0,
   });
   const { t, tProduct } = useLanguage();
+  const { isConnected } = useNetwork();
+  const [checkoutDisabled, setCheckoutDisabled] = useState(false);
 
   // Track if initial load from storage is done (to avoid overwriting stored data).
   const storageLoaded = useRef(false);
@@ -107,6 +110,7 @@ export default function CheckoutScreen({ navigation }: Props) {
     getSettings()
       .then((res) => {
         setFees((prev) => ({ ...prev, ...res.data }));
+        setCheckoutDisabled(Boolean(res.data.checkoutDisabled));
       })
       .catch((err) => console.error('Error fetching settings:', err));
   }, []);
@@ -153,27 +157,35 @@ export default function CheckoutScreen({ navigation }: Props) {
           longitude: fresh.coords.longitude,
         });
       } else {
-        Alert.alert(t('errorTitle'), t('locationErrorMsg'));
+        Alert.alert(t(' '), t('locationErrorMsg'));
       }
     } catch (e) {
       console.error('Location error:', e);
-      Alert.alert(t('errorTitle'), t('locationErrorMsg'));
+      Alert.alert(t(' '), t('locationErrorMsg'));
     } finally {
       setLocLoading(false);
     }
   };
 
   const handlePlaceOrder = async () => {
+    if (checkoutDisabled) {
+      Alert.alert(t(' '), t('cartUnavailableMsg'));
+      return;
+    }
+    if (items.length === 0) {
+      Alert.alert(t(' '), t('cartEmptyMsg'));
+      return;
+    }
+    if (!isConnected) {
+      Alert.alert(t(' '), t('cartUnavailableMsg'));
+      return;
+    }
     if (!mobile || mobile.length < 10) {
-      Alert.alert(t('errorTitle'), t('invalidMobileMsg'));
+      Alert.alert(t(' '), t('invalidMobileMsg'));
       return;
     }
     if (confirmMobile !== mobile) {
-      Alert.alert(t('errorTitle'), 'Contact numbers do not match. Please confirm your number.');
-      return;
-    }
-    if (!address || address.trim().length < 5) {
-      Alert.alert(t('errorTitle'), 'Please enter a valid address (minimum 5 characters).');
+      Alert.alert(t(' '), 'Contact numbers do not match. Please confirm your number.');
       return;
     }
     const subtotal = Number(totalAmount);
@@ -207,13 +219,14 @@ export default function CheckoutScreen({ navigation }: Props) {
       clearCart();
       navigation.replace('Success', { orderId: res.data._id });
     } catch {
-      Alert.alert(t('errorTitle'), t('orderFailedMsg'));
+      const message = !isConnected ? t('cartUnavailableMsg') : t('orderFailedMsg');
+      Alert.alert(t(' '), message);
     } finally {
       setPlacing(false);
     }
   };
 
-  const isReady = mobile.length >= 10 && confirmMobile === mobile && address.trim().length >= 5;
+  const isReady = mobile.length >= 10 && confirmMobile === mobile;
 
   const subtotal = Number(totalAmount);
   const isFreeDelivery = fees.deliveryFeeEnabled && fees.freeDeliveryThresholdEnabled && (subtotal >= Number(fees.freeDeliveryThreshold));
@@ -224,6 +237,13 @@ export default function CheckoutScreen({ navigation }: Props) {
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+
+      {!isConnected && (
+        <View style={styles.noticeBox}>
+          <Ionicons name="cloud-offline-outline" size={16} color="#dc2626" />
+          <Text style={styles.noticeText}>{t('cartUnavailableMsg')}</Text>
+        </View>
+      )}
 
       {/* Mobile Number */}
       <View style={styles.section}>
@@ -289,7 +309,7 @@ export default function CheckoutScreen({ navigation }: Props) {
         </View>
         <TextInput
           style={[styles.input, { minHeight: 60, textAlignVertical: 'top' }]}
-          placeholder="Enter complete address (House/Flat No, Building, Street, Landmark, Pin code)"
+          placeholder="Enter complete address (optional)"
           placeholderTextColor="#94a3b8"
           multiline
           numberOfLines={3}
@@ -451,6 +471,20 @@ const styles = StyleSheet.create({
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
   sectionTitle: { fontSize: 16, fontWeight: '800', color: '#0f172a' },
   sectionHint: { fontSize: 12, color: '#94a3b8', marginBottom: 12, marginTop: -8 },
+  noticeBox: {
+    marginHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#fef2f2',
+    borderColor: '#fecaca',
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+  },
+  noticeText: { flex: 1, color: '#b91c1c', fontSize: 13, fontWeight: '600', lineHeight: 18 },
   input: {
     backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0',
     borderRadius: 10, padding: 12, color: '#0f172a', fontSize: 15,
