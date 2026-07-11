@@ -20,10 +20,7 @@ import { useLanguage } from '../hooks/useLanguage';
 import { useNetwork } from '../hooks/useNetwork';
 import { Ionicons } from '@expo/vector-icons';
 
-const STORAGE_MOBILE_KEY = '@checkout_mobile';
-const STORAGE_CONFIRM_MOBILE_KEY = '@checkout_confirm_mobile';
 const STORAGE_ADDRESS_KEY = '@checkout_address';
-const STORAGE_LOCATION_KEY = '@checkout_location';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'Checkout'> };
 
@@ -49,39 +46,17 @@ export default function CheckoutScreen({ navigation }: Props) {
   const { isConnected } = useNetwork();
   const [checkoutDisabled, setCheckoutDisabled] = useState(false);
 
-  // Track if initial load from storage is done (to avoid overwriting stored data).
   const storageLoaded = useRef(false);
 
-  // Load all saved fields on mount
+  // Load saved delivery address on mount
   useEffect(() => {
-    AsyncStorage.multiGet([STORAGE_MOBILE_KEY, STORAGE_CONFIRM_MOBILE_KEY, STORAGE_ADDRESS_KEY, STORAGE_LOCATION_KEY])
-      .then((pairs) => {
-        const savedMobile = pairs[0][1];
-        const savedConfirmMobile = pairs[1][1];
-        const savedAddress = pairs[2][1];
-        const savedLocation = pairs[3][1];
-        if (savedMobile) setMobile(savedMobile);
-        if (savedConfirmMobile) setConfirmMobile(savedConfirmMobile);
+    AsyncStorage.getItem(STORAGE_ADDRESS_KEY)
+      .then((savedAddress) => {
         if (savedAddress) setAddress(savedAddress);
-        if (savedLocation) {
-          try { setLocation(JSON.parse(savedLocation)); } catch {}
-        }
       })
       .catch((err) => console.error('AsyncStorage load error:', err))
       .finally(() => { storageLoaded.current = true; });
   }, []);
-
-  // Auto-save mobile when it changes
-  useEffect(() => {
-    if (!storageLoaded.current) return;
-    AsyncStorage.setItem(STORAGE_MOBILE_KEY, mobile).catch(() => {});
-  }, [mobile]);
-
-  // Auto-save confirmMobile when it changes
-  useEffect(() => {
-    if (!storageLoaded.current) return;
-    AsyncStorage.setItem(STORAGE_CONFIRM_MOBILE_KEY, confirmMobile).catch(() => {});
-  }, [confirmMobile]);
 
   // Auto-save address when it changes
   useEffect(() => {
@@ -89,19 +64,9 @@ export default function CheckoutScreen({ navigation }: Props) {
     AsyncStorage.setItem(STORAGE_ADDRESS_KEY, address).catch(() => {});
   }, [address]);
 
-  // Auto-save location when it changes
-  useEffect(() => {
-    if (!storageLoaded.current) return;
-    if (location) {
-      AsyncStorage.setItem(STORAGE_LOCATION_KEY, JSON.stringify(location)).catch(() => {});
-    }
-  }, [location]);
-
-  // Clear all saved info
+  // Clear saved address and current delivery fields
   const handleClearSaved = () => {
-    AsyncStorage.multiRemove([STORAGE_MOBILE_KEY, STORAGE_CONFIRM_MOBILE_KEY, STORAGE_ADDRESS_KEY, STORAGE_LOCATION_KEY]).catch(() => {});
-    setMobile('');
-    setConfirmMobile('');
+    AsyncStorage.removeItem(STORAGE_ADDRESS_KEY).catch(() => {});
     setAddress('');
     setLocation(null);
   };

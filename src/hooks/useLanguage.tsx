@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getSettings } from '../services/api';
 
@@ -216,6 +216,12 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     mr: {},
     hi: {},
   });
+  const dynamicTranslationsRef = useRef<Record<Language, Record<string, string>>>({
+    en: {},
+    mr: {},
+    hi: {},
+  });
+  const pendingTranslationsRef = useRef<Record<string, boolean>>({});
 
   useEffect(() => {
     const init = async () => {
@@ -232,6 +238,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
         cacheObj.mr = cacheObj.mr || {};
         cacheObj.hi = cacheObj.hi || {};
 
+        dynamicTranslationsRef.current = cacheObj;
         setDynamicTranslations(cacheObj);
 
         if (savedLang && (savedLang === 'en' || savedLang === 'mr' || savedLang === 'hi')) {
@@ -259,6 +266,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
                   });
 
                   cacheObj[backendDefaultLang as Language] = newCacheForLang;
+                  dynamicTranslationsRef.current = { ...cacheObj };
                   setDynamicTranslations({ ...cacheObj });
                   await AsyncStorage.setItem('veggie_app_dynamic_translations_v2', JSON.stringify(cacheObj));
                 }
@@ -276,6 +284,11 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     init();
   }, []);
 
+  const updateTranslationCache = useCallback((nextCache: Record<Language, Record<string, string>>) => {
+    dynamicTranslationsRef.current = nextCache;
+    setDynamicTranslations(nextCache);
+  }, []);
+
   const setLanguage = useCallback(async (newLang: Language) => {
     if (newLang === 'en') {
       setLanguageState('en');
@@ -284,7 +297,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     }
 
     const englishKeys = Object.keys(translations.en);
-    const existingCache = dynamicTranslations[newLang] || {};
+    const existingCache = dynamicTranslationsRef.current[newLang] || {};
     
     const translatedCount = englishKeys.filter(k => existingCache[k]).length;
     const isTranslated = translatedCount >= englishKeys.length * 0.8;
@@ -306,11 +319,11 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
       });
 
       const updatedCache = {
-        ...dynamicTranslations,
+        ...dynamicTranslationsRef.current,
         [newLang]: newCacheForLang
       };
       
-      setDynamicTranslations(updatedCache);
+      updateTranslationCache(updatedCache);
       await AsyncStorage.setItem('veggie_app_dynamic_translations_v2', JSON.stringify(updatedCache));
       setLanguageState(newLang);
       await AsyncStorage.setItem('veggie_app_language', newLang);
@@ -337,8 +350,9 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
         return translations.en[key] || key;
       }
 
-      if (dynamicTranslations[language] && dynamicTranslations[language][key]) {
-        return dynamicTranslations[language][key];
+      const cached = dynamicTranslationsRef.current[language]?.[key];
+      if (cached) {
+        return cached;
       }
 
       if (language === 'mr' && translations.mr[key]) {
@@ -347,35 +361,43 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
 
       return translations.en[key] || key;
     },
-    [language, dynamicTranslations]
+    [language]
   );
 
   const translateOnTheFly = useCallback(async (text: string, targetLang: Language) => {
     if (!text || targetLang === 'en') return;
-    
-    if (dynamicTranslations[targetLang] && dynamicTranslations[targetLang][text]) {
+
+    const cacheKey = `${targetLang}:${text}`;
+    if (pendingTranslationsRef.current[cacheKey]) {
       return;
     }
+
+    const cached = dynamicTranslationsRef.current[targetLang]?.[text];
+    if (cached) {
+      return;
+    }
+
+    pendingTranslationsRef.current[cacheKey] = true;
 
     try {
       const translated = await translateText(text, targetLang);
       if (translated && translated !== text) {
-        setDynamicTranslations(prev => {
-          const updated = {
-            ...prev,
-            [targetLang]: {
-              ...prev[targetLang],
-              [text]: translated
-            }
-          };
-          AsyncStorage.setItem('veggie_app_dynamic_translations_v2', JSON.stringify(updated)).catch(console.error);
-          return updated;
-        });
+        const updated = {
+          ...dynamicTranslationsRef.current,
+          [targetLang]: {
+            ...dynamicTranslationsRef.current[targetLang],
+            [text]: translated
+          }
+        };
+        updateTranslationCache(updated);
+        AsyncStorage.setItem('veggie_app_dynamic_translations_v2', JSON.stringify(updated)).catch(console.error);
       }
     } catch (e) {
       console.error('On-the-fly translation failed', e);
+    } finally {
+      delete pendingTranslationsRef.current[cacheKey];
     }
-  }, [dynamicTranslations]);
+  }, [updateTranslationCache]);
 
   const tProduct = useCallback(
     (name: { en: string; mr: string } | string | undefined): string => {
@@ -404,7 +426,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
         return presetMarathiText;
       }
 
-      const cached = dynamicTranslations[language]?.[englishText];
+      const cached = dynamicTranslationsRef.current[language]?.[englishText];
       if (cached) {
         return cached;
       }
@@ -432,7 +454,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
         if (matchKey) return translationsForLang[matchKey];
       }
 
-      const cached = dynamicTranslations[language]?.[catName];
+      const cached = dynamicTranslationsRef.current[language]?.[catName];
       if (cached) {
         return cached;
       }

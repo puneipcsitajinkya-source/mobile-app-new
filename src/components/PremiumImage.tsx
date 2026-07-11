@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, memo } from 'react';
 import {
   View,
   Image,
@@ -7,6 +7,7 @@ import {
   ViewStyle,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { resolveMediaUrl } from '../services/api';
 
 interface PremiumImageProps {
   uri?: string;
@@ -18,7 +19,7 @@ interface PremiumImageProps {
   resizeMode?: 'cover' | 'contain' | 'stretch' | 'center';
 }
 
-export default function PremiumImage({
+const PremiumImage = memo(function PremiumImage({
   uri,
   style,
   containerStyle,
@@ -28,10 +29,9 @@ export default function PremiumImage({
   resizeMode = 'contain',
 }: PremiumImageProps) {
   const [hasError, setHasError] = useState(false);
+  const resolvedUri = resolveMediaUrl(uri);
 
-  const showPlaceholder = !uri || hasError;
-
-
+  const showPlaceholder = !resolvedUri || hasError;
 
   if (showPlaceholder) {
     return (
@@ -53,14 +53,16 @@ export default function PremiumImage({
   return (
     <View style={[style, containerStyle, { overflow: 'hidden' }]}>
       <Image
-        source={{ uri }}
+        source={{ uri: resolvedUri! }}
         style={StyleSheet.absoluteFill}
         resizeMode={resizeMode}
         onError={() => setHasError(true)}
       />
     </View>
   );
-}
+});
+
+export default PremiumImage;
 
 const styles = StyleSheet.create({
   placeholderContainer: {

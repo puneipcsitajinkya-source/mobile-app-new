@@ -256,7 +256,7 @@ const styles = StyleSheet.create({
   checkoutAmount: { color: '#ffffff', fontSize: 16, fontWeight: '800', marginBottom: 2 },
   checkoutSub: { color: '#ffffff', fontSize: 10, fontWeight: '700', opacity: 0.8 },
   checkoutBtnText: { color: '#fff', fontSize: 16, fontWeight: '800' },
-  empty: { flex: 1, backgroundColor: '#f1f5f9', alignItems: 'center', justifyContent: 'center', padding: 30 },
+  empty: { flex: 1, backgroundColor: '#f1f5f9', alignItems: 'center', justifyContent: 'center', padding: 30, paddingBottom: 120 },
   emptyIconContainer: {
     width: 110, height: 110, borderRadius: 55, backgroundColor: '#faf5ff', alignItems: 'center', justifyContent: 'center',
     marginBottom: 20, borderWidth: 2, borderColor: '#f3e8ff',

@@ -1,4 +1,5 @@
 import React from 'react';
+import { enableScreens } from 'react-native-screens';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { CartProvider } from './src/hooks/useCart';
@@ -6,6 +7,8 @@ import { LanguageProvider } from './src/hooks/useLanguage';
 import { NetworkProvider } from './src/hooks/useNetwork';
 import ErrorBoundary from './src/components/ErrorBoundary';
 import AppNavigator from './src/navigation/AppNavigator';
+
+enableScreens();
 
 export default function App() {
   return (

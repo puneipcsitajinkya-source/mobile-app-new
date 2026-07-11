@@ -1,13 +1,14 @@
-import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef, memo } from 'react';
 import {
   View, Text, FlatList, TextInput, TouchableOpacity,
-  Image, StyleSheet, ScrollView, RefreshControl, Dimensions,
-  Platform, Modal, ActivityIndicator, Animated
+  Image, StyleSheet, RefreshControl, Dimensions,
+  Platform, Modal, ActivityIndicator
 } from 'react-native';
-import PremiumLoader from '../components/PremiumLoader';
 import PremiumImage from '../components/PremiumImage';
+import { CompositeNavigationProp } from '@react-navigation/native';
+import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { RootStackParamList } from '../navigation/AppNavigator';
+import { RootStackParamList, TabParamList } from '../navigation/AppNavigator';
 import { getProducts, getCategories } from '../services/api';
 import { useCart } from '../hooks/useCart';
 import { useLanguage } from '../hooks/useLanguage';
@@ -17,7 +18,12 @@ import { Ionicons } from '@expo/vector-icons';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const APP_LOGO = require('../../assets/icon.png');
 
-type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'Main'> };
+type Props = {
+  navigation: CompositeNavigationProp<
+    BottomTabNavigationProp<TabParamList, 'Home'>,
+    NativeStackNavigationProp<RootStackParamList>
+  >;
+};
 
 interface Product {
   _id: string;
@@ -41,19 +47,113 @@ interface Category {
 const { width } = Dimensions.get('window');
 const PROMO_WIDTH = width - 48;
 
+const PROMO_ITEMS = [
+  {
+    title: 'Super Fast Delivery',
+    subtitle: 'Fresh groceries in minutes',
+    badge: 'Priority',
+    image: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&q=80&w=1000',
+    backgroundColor: '#7c3aed',
+  },
+  {
+    title: 'Premium Savings',
+    subtitle: 'Get up to 15% off on daily essentials',
+    badge: 'Limited Offer',
+    image: 'https://images.unsplash.com/photo-1514996937319-344454492b37?auto=format&fit=crop&q=80&w=1000',
+    backgroundColor: '#0f766e',
+  },
+  {
+    title: 'New Arrivals',
+    subtitle: 'Exclusive store deals just for you',
+    badge: 'Just In',
+    image: 'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&q=80&w=1000',
+    backgroundColor: '#f59e0b',
+  },
+];
+
+interface ProductCardProps {
+  item: Product;
+  qty: number;
+  onPress: (productId: string) => void;
+  onAdd: (product: Product) => void;
+  onIncrement: (productId: string) => void;
+  onDecrement: (productId: string) => void;
+  productLabel: string;
+}
+
+const ProductCard = memo(function ProductCard({
+  item,
+  qty,
+  onPress,
+  onAdd,
+  onIncrement,
+  onDecrement,
+  productLabel,
+}: ProductCardProps) {
+  return (
+    <TouchableOpacity
+      style={styles.card}
+      onPress={() => onPress(item._id)}
+      activeOpacity={0.9}
+    >
+      <View style={styles.cardImgContainer}>
+        <PremiumImage
+          uri={item.image}
+          style={styles.cardImg}
+          iconName="leaf-outline"
+          iconSize={28}
+        />
+        {(item.discount ?? 0) > 0 && (
+          <View style={styles.discountBadge}>
+            <Text style={styles.discountText}>{item.discount}% OFF</Text>
+          </View>
+        )}
+      </View>
+      <View style={styles.cardBody}>
+        <Text style={styles.cardUnit}>{item.unit || '1 pc'}</Text>
+        <Text style={styles.cardName} numberOfLines={2}>{productLabel}</Text>
+
+        <View style={styles.priceRow}>
+          <View>
+            <Text style={styles.cardPrice}>₹{item.price}</Text>
+            {item.mrp != null && item.mrp > item.price && (
+              <Text style={styles.cardMrp}>₹{item.mrp}</Text>
+            )}
+          </View>
+          {qty > 0 ? (
+            <View style={styles.qtyControl}>
+              <TouchableOpacity style={styles.qtyButton} onPress={() => onDecrement(item._id)} activeOpacity={0.7}>
+                <Text style={styles.qtyButtonText}>-</Text>
+              </TouchableOpacity>
+              <Text style={styles.qtyValue}>{qty}</Text>
+              <TouchableOpacity style={styles.qtyButton} onPress={() => onIncrement(item._id)} activeOpacity={0.7}>
+                <Text style={styles.qtyButtonText}>+</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={styles.addBtn}
+              onPress={() => onAdd(item)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.addBtnText}>ADD</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+});
+
 export default function HomeScreen({ navigation }: Props) {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const { addToCart, items: cart, totalItems, totalAmount: cartTotal } = useCart();
-  const [added, setAdded] = useState<string | null>(null);
+  const { addToCart, items: cart, totalItems, totalAmount: cartTotal, increaseQty, decreaseQty } = useCart();
   const [langModalVisible, setLangModalVisible] = useState(false);
-  const [activePromo, setActivePromo] = useState(0);
-  const promoScrollX = useRef(new Animated.Value(0)).current;
-  const promoRef = useRef<FlatList<any> | null>(null);
-  const { language, setLanguage, translating, t, tProduct, tCategory } = useLanguage();
+  const { language, setLanguage, translating, tProduct, tCategory } = useLanguage();
   const { onReconnect } = useNetwork();
 
   const load = useCallback(async () => {
@@ -110,102 +210,167 @@ export default function HomeScreen({ navigation }: Props) {
     })).filter(group => group.products.length > 0);
   }, [products, uniqueCategories, search]);
 
-  const handleAdd = (product: Product) => {
+  const handleAdd = useCallback((product: Product) => {
     addToCart({ _id: product._id, name: product.name, price: product.price, image: product.image, mrp: product.mrp });
-    setAdded(product._id);
-    setTimeout(() => setAdded(null), 1000);
-  };
-
-  const getProductQty = (id: string) => {
-    const item = cart.find(c => c._id === id);
-    return item ? item.quantity : 0;
-  };
-
-  const promoItems = [
-    {
-      title: 'Super Fast Delivery',
-      subtitle: 'Fresh groceries in minutes',
-      badge: 'Priority',
-      image: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&q=80&w=1000',
-      backgroundColor: '#7c3aed',
-    },
-    {
-      title: 'Premium Savings',
-      subtitle: 'Get up to 15% off on daily essentials',
-      badge: 'Limited Offer',
-      image: 'https://images.unsplash.com/photo-1514996937319-344454492b37?auto=format&fit=crop&q=80&w=1000',
-      backgroundColor: '#0f766e',
-    },
-    {
-      title: 'New Arrivals',
-      subtitle: 'Exclusive store deals just for you',
-      badge: 'Just In',
-      image: 'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&q=80&w=1000',
-      backgroundColor: '#f59e0b',
-    },
-  ];
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const nextIndex = (activePromo + 1) % promoItems.length;
-      promoRef.current?.scrollToOffset({ offset: nextIndex * PROMO_WIDTH, animated: true });
-    }, 4500);
-    return () => clearInterval(interval);
-  }, [activePromo]);
+  }, [addToCart]);
 
   const handleProductPress = useCallback((productId: string) => {
     navigation.navigate('ProductDetail', { productId });
   }, [navigation]);
 
-  const renderProduct = useCallback(({ item }: { item: Product }) => {
-    const qty = getProductQty(item._id);
-    return (
-      <TouchableOpacity
-        style={styles.card}
-        onPress={() => handleProductPress(item._id)}
-        activeOpacity={0.9}
-      >
-        <View style={styles.cardImgContainer}>
-          <PremiumImage
-            uri={item.image}
-            style={styles.cardImg}
-            iconName="leaf-outline"
-            iconSize={28}
-          />
-          {(item.discount ?? 0) > 0 && (
-            <View style={styles.discountBadge}>
-              <Text style={styles.discountText}>{item.discount}% OFF</Text>
-            </View>
-          )}
-        </View>
-        <View style={styles.cardBody}>
-          <Text style={styles.cardUnit}>{item.unit || '1 pc'}</Text>
-          <Text style={styles.cardName} numberOfLines={2}>{tProduct(item.name)}</Text>
+  const qtyMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    cart.forEach(item => {
+      map[item._id] = item.quantity;
+    });
+    return map;
+  }, [cart]);
 
-          <View style={styles.priceRow}>
-            <View>
-              <Text style={styles.cardPrice}>₹{item.price}</Text>
-              {item.mrp != null && item.mrp > item.price && (
-                <Text style={styles.cardMrp}>₹{item.mrp}</Text>
-              )}
-            </View>
-            <TouchableOpacity
-              style={[styles.addBtn, qty > 0 && styles.addedBtn]}
-              onPress={() => handleAdd(item)}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.addBtnText, qty > 0 && styles.addedBtnText]}>
-                {qty > 0 ? qty : 'ADD'}
-              </Text>
-            </TouchableOpacity>
+  const [activePromoIndex, setActivePromoIndex] = useState(0);
+  const promoListRef = useRef<FlatList<typeof PROMO_ITEMS[number]> | null>(null);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setActivePromoIndex((currentIndex) => {
+        const nextIndex = (currentIndex + 1) % PROMO_ITEMS.length;
+        promoListRef.current?.scrollToOffset({ offset: nextIndex * PROMO_WIDTH, animated: true });
+        return nextIndex;
+      });
+    }, 4500);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  const renderPromoItem = useCallback(({ item }: { item: typeof PROMO_ITEMS[number] }) => (
+    <View style={[styles.promoCard, { width: PROMO_WIDTH, backgroundColor: item.backgroundColor }]}> 
+      <Image source={{ uri: item.image }} style={styles.promoImg} />
+      <View style={styles.promoOverlay} />
+      <View style={styles.promoContent}>
+        <View style={styles.promoBadge}>
+          <Text style={styles.promoBadgeText}>{item.badge}</Text>
+        </View>
+        <Text style={styles.promoTitle}>{item.title}</Text>
+        <Text style={styles.promoSub}>{item.subtitle}</Text>
+      </View>
+    </View>
+  ), []);
+
+  const renderProduct = useCallback(({ item }: { item: Product }) => (
+    <ProductCard
+      item={item}
+      qty={qtyMap[item._id] ?? 0}
+      onPress={handleProductPress}
+      onAdd={handleAdd}
+      onIncrement={increaseQty}
+      onDecrement={decreaseQty}
+      productLabel={tProduct(item.name)}
+    />
+  ), [qtyMap, handleAdd, handleProductPress, tProduct, increaseQty, decreaseQty]);
+
+  const renderCategoryGroup = useCallback(({ item: group }: { item: { category: Category; products: Product[] } }) => (
+    <View key={group.category._id} style={styles.horizontalSection}>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>{group.category.name === 'Search Results' ? group.category.name : tCategory(group.category.name)}</Text>
+        {group.category.name !== 'Search Results' && (
+          <TouchableOpacity onPress={() => navigation.navigate('CategoryProducts', { categoryName: group.category.name })}>
+            <Text style={styles.seeAllText}>See all</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+      <FlatList
+        horizontal
+        data={group.products}
+        renderItem={renderProduct}
+        keyExtractor={(item) => item._id}
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.horizontalScroll}
+        initialNumToRender={4}
+        maxToRenderPerBatch={4}
+        windowSize={5}
+        removeClippedSubviews
+        nestedScrollEnabled
+        getItemLayout={(_data, index) => ({ length: 148, offset: 148 * index, index })}
+        extraData={qtyMap}
+      />
+    </View>
+  ), [renderProduct, tCategory, navigation, qtyMap]);
+
+  const listHeaderComponent = useMemo(() => (
+    <View>
+      {!search && (
+        <View style={styles.promoWrapper}>
+          <FlatList
+            ref={promoListRef}
+            data={PROMO_ITEMS}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            snapToAlignment="center"
+            decelerationRate="fast"
+            contentContainerStyle={styles.promoScrollContent}
+            renderItem={renderPromoItem}
+            keyExtractor={(_, index) => `promo-${index}`}
+            onMomentumScrollEnd={(event) => {
+              const index = Math.round(event.nativeEvent.contentOffset.x / PROMO_WIDTH);
+              setActivePromoIndex(index);
+            }}
+          />
+          <View style={styles.promoDotContainer}>
+            {PROMO_ITEMS.map((_, index) => (
+              <View
+                key={index}
+                style={[styles.promoDot, index === activePromoIndex && styles.promoDotActive]}
+              />
+            ))}
           </View>
         </View>
-      </TouchableOpacity>
-    );
-  }, [getProductQty, handleAdd, handleProductPress, tProduct]);
+      )}
+
+      {!search && (
+        <View style={styles.categoryGridContainer}>
+          {uniqueCategories.map((cat) => (
+            <TouchableOpacity
+              key={cat._id}
+              style={styles.catGridItem}
+              activeOpacity={0.7}
+              onPress={() => navigation.navigate('CategoryProducts', { categoryName: cat.name })}
+            >
+              <View style={styles.catGridImgContainer}>
+                {cat.image ? (
+                  <PremiumImage
+                    uri={cat.image}
+                    style={styles.catGridImg}
+                    iconName="grid-outline"
+                    iconSize={22}
+                  />
+                ) : (
+                  <Text style={styles.catGridIcon}>{cat.icon}</Text>
+                )}
+              </View>
+              <Text style={styles.catGridText} numberOfLines={2}>{tCategory(cat.name)}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+    </View>
+  ), [search, uniqueCategories, navigation, tCategory]);
+
+  const emptyStateComponent = useMemo(() => (
+    <View style={styles.emptyState}>
+      <View style={styles.emptyIconBox}>
+        <Ionicons name="search-outline" size={44} color="#4b5563" />
+      </View>
+      <Text style={styles.emptyTitle}>No products found</Text>
+      <Text style={styles.emptySubText}>Try a different keyword or check back later.</Text>
+    </View>
+  ), []);
 
   if (loading) {
-    return <PremiumLoader message="Loading fresh items..." icon="leaf" />;
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f1f5f9' }}>
+        <ActivityIndicator size="large" color="#7c3aed" />
+      </View>
+    );
   }
 
   return (
@@ -223,18 +388,18 @@ export default function HomeScreen({ navigation }: Props) {
             </View>
 
           </View>
-          <TouchableOpacity style={styles.profileBtn}>
-            <Ionicons name="person-circle-outline" size={36} color="#ffffff" />
-          </TouchableOpacity>
+          {/* <TouchableOpacity style={styles.profileBtn}>
+            <Ionicons name="person-circle-outline" size={36} color="#4b5563" />
+          </TouchableOpacity> */}
           <TouchableOpacity style={styles.languageTogglePill} onPress={() => setLangModalVisible(true)}>
-            <Ionicons name="globe-outline" size={15} color="#ffffff" style={{ marginRight: 4 }} />
+            <Ionicons name="globe-outline" size={15} color="#4b5563" style={{ marginRight: 4 }} />
             <Text style={styles.languageToggleText}>{language.toUpperCase()}</Text>
           </TouchableOpacity>
         </View>
 
         <View style={styles.searchRow}>
           <View style={styles.searchBox}>
-            <Ionicons name="search-outline" size={20} color="#64748b" style={{ marginRight: 8 }} />
+            <Ionicons name="search-outline" size={20} color="#4b5563" style={{ marginRight: 8 }} />
             <TextInput
               style={styles.searchInput}
               placeholder='Search "milk"'
@@ -246,141 +411,25 @@ export default function HomeScreen({ navigation }: Props) {
         </View>
       </View>
 
-      <ScrollView
-        style={{ flex: 1 }}
+      <FlatList
+        data={productsByCategory}
+        keyExtractor={(item) => item.category._id}
+        renderItem={renderCategoryGroup}
+        ListHeaderComponent={listHeaderComponent}
+        ListFooterComponent={search && productsByCategory.length === 0 ? emptyStateComponent : null}
         contentContainerStyle={{ paddingBottom: 100 }}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
-      >
-        {/* PROMO BANNER */}
-        {!search && (
-          <View style={styles.promoWrapper}>
-            <Animated.FlatList
-              ref={promoRef}
-              data={promoItems}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              snapToInterval={PROMO_WIDTH}
-              decelerationRate="fast"
-              pagingEnabled
-              contentContainerStyle={styles.promoScrollContent}
-              onScroll={Animated.event(
-                [{ nativeEvent: { contentOffset: { x: promoScrollX } } }],
-                { useNativeDriver: true }
-              )}
-              onMomentumScrollEnd={(event) => {
-                const index = Math.round(event.nativeEvent.contentOffset.x / PROMO_WIDTH);
-                setActivePromo(index);
-              }}
-              scrollEventThrottle={16}
-              keyExtractor={(item) => item.title}
-              renderItem={({ item, index }) => {
-                const inputRange = [
-                  (index - 1) * PROMO_WIDTH,
-                  index * PROMO_WIDTH,
-                  (index + 1) * PROMO_WIDTH,
-                ];
-                const scale = promoScrollX.interpolate({
-                  inputRange,
-                  outputRange: [0.94, 1, 0.94],
-                  extrapolate: 'clamp',
-                });
-                const opacity = promoScrollX.interpolate({
-                  inputRange,
-                  outputRange: [0.8, 1, 0.8],
-                  extrapolate: 'clamp',
-                });
-                return (
-                  <Animated.View style={[styles.promoCard, { width: PROMO_WIDTH, transform: [{ scale }], opacity, backgroundColor: item.backgroundColor }]}>
-                    <Image source={{ uri: item.image }} style={styles.promoImg} />
-                    <View style={styles.promoOverlay} />
-                    <View style={styles.promoContent}>
-                      <View style={styles.promoBadge}>
-                        <Text style={styles.promoBadgeText}>{item.badge}</Text>
-                      </View>
-                      <Text style={styles.promoTitle}>{item.title}</Text>
-                      <Text style={styles.promoSub}>{item.subtitle}</Text>
-                    </View>
-                  </Animated.View>
-                );
-              }}
-            />
-            <View style={styles.promoDotContainer}>
-              {promoItems.map((_, index) => (
-                <View
-                  key={index}
-                  style={[styles.promoDot, index === activePromo && styles.promoDotActive]}
-                />
-              ))}
-            </View>
-          </View>
-        )}
-
-        {/* CATEGORY GRID */}
-        {!search && (
-          <View style={styles.categoryGridContainer}>
-            {uniqueCategories.map((cat) => (
-              <TouchableOpacity
-                key={cat._id}
-                style={styles.catGridItem}
-                activeOpacity={0.7}
-                onPress={() => navigation.navigate('CategoryProducts', { categoryName: cat.name })}
-              >
-                <View style={styles.catGridImgContainer}>
-                  {cat.image ? (
-                    <PremiumImage
-                      uri={cat.image}
-                      style={styles.catGridImg}
-                      iconName="grid-outline"
-                      iconSize={22}
-                    />
-                  ) : (
-                    <Text style={styles.catGridIcon}>{cat.icon}</Text>
-                  )}
-                </View>
-                <Text style={styles.catGridText} numberOfLines={2}>{tCategory(cat.name)}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-
-        {/* PRODUCTS BY CATEGORY */}
-        {productsByCategory.map((group) => (
-          <View key={group.category._id} style={styles.horizontalSection}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>{group.category.name === 'Search Results' ? group.category.name : tCategory(group.category.name)}</Text>
-              {group.category.name !== 'Search Results' && (
-                <TouchableOpacity onPress={() => navigation.navigate('CategoryProducts', { categoryName: group.category.name })}>
-                  <Text style={styles.seeAllText}>See all</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-            <FlatList
-              horizontal
-              data={group.products}
-              renderItem={renderProduct}
-              keyExtractor={(item) => item._id}
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.horizontalScroll}
-              initialNumToRender={6}
-              maxToRenderPerBatch={4}
-              windowSize={5}
-              removeClippedSubviews
-              extraData={cart}
-            />
-          </View>
-        ))}
-
-        {productsByCategory.length === 0 && search && (
-          <View style={styles.emptyState}>
-            <View style={styles.emptyIconBox}>
-              <Ionicons name="search-outline" size={44} color="#a855f7" />
-            </View>
-            <Text style={styles.emptyTitle}>No products found</Text>
-            <Text style={styles.emptySubText}>Try a different keyword or check back later.</Text>
-          </View>
-        )}
-      </ScrollView>
+        refreshing={refreshing}
+        onRefresh={() => { setRefreshing(true); load(); }}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        initialNumToRender={3}
+        maxToRenderPerBatch={3}
+        windowSize={5}
+        removeClippedSubviews
+        updateCellsBatchingPeriod={30}
+        scrollEventThrottle={16}
+      />
 
       {/* STICKY CART */}
       {totalItems > 0 && (
@@ -392,7 +441,7 @@ export default function HomeScreen({ navigation }: Props) {
           >
             <View style={styles.cartInfo}>
               <View style={styles.cartIconWrapper}>
-                <Ionicons name="cart" size={20} color="#a855f7" />
+                <Ionicons name="cart" size={20} color="#4b5563" />
               </View>
               <View>
                 <Text style={styles.cartItemsText}>{totalItems} item{totalItems > 1 ? 's' : ''}</Text>
@@ -401,7 +450,7 @@ export default function HomeScreen({ navigation }: Props) {
             </View>
             <View style={styles.cartAction}>
               <Text style={styles.cartActionText}>View Cart</Text>
-              <Ionicons name="caret-forward" size={16} color="#ffffff" />
+              <Ionicons name="caret-forward" size={16} color="#4b5563" />
             </View>
           </TouchableOpacity>
         </View>
@@ -429,7 +478,7 @@ export default function HomeScreen({ navigation }: Props) {
               }}
             >
               <Text style={[styles.langText, language === 'en' && styles.activeLangText]}>🇬🇧 English</Text>
-              {language === 'en' && <Ionicons name="checkmark-circle" size={20} color="#a855f7" />}
+              {language === 'en' && <Ionicons name="checkmark-circle" size={20} color="#4b5563" />}
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -440,7 +489,7 @@ export default function HomeScreen({ navigation }: Props) {
               }}
             >
               <Text style={[styles.langText, language === 'hi' && styles.activeLangText]}>🇮🇳 हिंदी (Hindi)</Text>
-              {language === 'hi' && <Ionicons name="checkmark-circle" size={20} color="#a855f7" />}
+              {language === 'hi' && <Ionicons name="checkmark-circle" size={20} color="#4b5563" />}
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -451,7 +500,7 @@ export default function HomeScreen({ navigation }: Props) {
               }}
             >
               <Text style={[styles.langText, language === 'mr' && styles.activeLangText]}>🇮🇳 मराठी (Marathi)</Text>
-              {language === 'mr' && <Ionicons name="checkmark-circle" size={20} color="#a855f7" />}
+              {language === 'mr' && <Ionicons name="checkmark-circle" size={20} color="#4b5563" />}
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.closeBtn} onPress={() => setLangModalVisible(false)}>
@@ -464,7 +513,7 @@ export default function HomeScreen({ navigation }: Props) {
       {/* Translating Spinner Overlay */}
       {translating && (
         <View style={styles.translatingOverlay}>
-          <ActivityIndicator size="large" color="#a855f7" />
+          <ActivityIndicator size="large" color="#7c3aed" />
           <Text style={styles.translatingText}>Translating application...</Text>
           <Text style={styles.translatingSubText}>कृपया प्रतीक्षा करा / कृपया प्रतीक्षा करें</Text>
         </View>
@@ -476,9 +525,9 @@ export default function HomeScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8fafc' },
   header: {
-    backgroundColor: '#a855f7',
-    paddingTop: Platform.OS === 'ios' ? 50 : 40,
-    paddingBottom: 16,
+    backgroundColor: '#7c3aed',
+    paddingTop: Platform.OS === 'ios' ? 40 : 32,
+    paddingBottom: 12,
     paddingHorizontal: 16,
     borderBottomLeftRadius: 16,
     borderBottomRightRadius: 16,
@@ -591,7 +640,7 @@ const styles = StyleSheet.create({
   horizontalSection: { marginBottom: 24 },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, marginBottom: 12 },
   sectionTitle: { fontSize: 18, fontWeight: '800', color: '#0f172a' },
-  seeAllText: { fontSize: 14, fontWeight: '600', color: '#a855f7' },
+  seeAllText: { fontSize: 14, fontWeight: '600', color: '#7c3aed' },
   horizontalScroll: { paddingHorizontal: 12, paddingBottom: 4 },
   card: {
     width: 140, backgroundColor: '#ffffff', borderRadius: 12, marginHorizontal: 4,
@@ -613,15 +662,21 @@ const styles = StyleSheet.create({
   cardPrice: { fontSize: 14, fontWeight: '800', color: '#0f172a' },
   cardMrp: { fontSize: 11, color: '#94a3b8', textDecorationLine: 'line-through', marginTop: 2 },
   addBtn: {
-    backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#a855f7',
-    borderRadius: 6, paddingHorizontal: 10, paddingVertical: 4, minWidth: 50, alignItems: 'center'
+    backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#7c3aed',
+    borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, minWidth: 44, alignItems: 'center'
   },
-  addedBtn: { backgroundColor: '#a855f7' },
-  addBtnText: { color: '#a855f7', fontSize: 12, fontWeight: '800' },
-  addedBtnText: { color: '#ffffff' },
+  addBtnText: { color: '#7c3aed', fontSize: 11, fontWeight: '800' },
+  qtyControl: {
+    flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#7c3aed', borderRadius: 8, overflow: 'hidden', minWidth: 50, height: 26
+  },
+  qtyButton: {
+    width: 24, height: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: '#7c3aed',
+  },
+  qtyButtonText: { color: '#ffffff', fontSize: 13, fontWeight: '700' },
+  qtyValue: { minWidth: 20, textAlign: 'center', fontSize: 12, fontWeight: '700', color: '#0f172a' },
   emptyState: {
     alignItems: 'center', justifyContent: 'center',
-    paddingVertical: 36, paddingHorizontal: 20,
+    paddingVertical: 36, paddingHorizontal: 20, paddingBottom: 100,
     marginHorizontal: 16, marginTop: 8,
     borderRadius: 16, backgroundColor: '#ffffff',
     borderWidth: 1, borderColor: '#e2e8f0'
@@ -638,9 +693,9 @@ const styles = StyleSheet.create({
     zIndex: 100,
   },
   stickyCart: {
-    backgroundColor: '#a855f7', borderRadius: 12, flexDirection: 'row',
+    backgroundColor: '#7c3aed', borderRadius: 12, flexDirection: 'row',
     alignItems: 'center', justifyContent: 'space-between', padding: 12,
-    shadowColor: '#a855f7', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 6
+    shadowColor: '#7c3aed', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 6
   },
   cartInfo: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   cartIconWrapper: {
@@ -688,7 +743,7 @@ const styles = StyleSheet.create({
     borderColor: '#e2e8f0',
   },
   activeLangOption: {
-    borderColor: '#a855f7',
+    borderColor: '#7c3aed',
     backgroundColor: '#faf5ff',
   },
   langText: {
@@ -697,7 +752,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   activeLangText: {
-    color: '#a855f7',
+    color: '#7c3aed',
     fontWeight: '700',
   },
   closeBtn: {

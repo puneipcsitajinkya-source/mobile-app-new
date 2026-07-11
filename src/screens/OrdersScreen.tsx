@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, FlatList,
-  StyleSheet, RefreshControl, ScrollView,
+  StyleSheet, RefreshControl, ScrollView, ActivityIndicator,
 } from 'react-native';
-import PremiumLoader from '../components/PremiumLoader';
 import { getOrdersByMobile, getSettings } from '../services/api';
 import { useLanguage } from '../hooks/useLanguage';
 import { Ionicons } from '@expo/vector-icons';
@@ -235,7 +234,9 @@ export default function OrdersScreen() {
 
       {/* Orders List */}
       {loading ? (
-        <PremiumLoader message="Loading orders" icon="receipt-outline" />
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 40 }}>
+          <ActivityIndicator size="large" color="#a855f7" />
+        </View>
       ) : orders.length === 0 ? (
         <ScrollView
           contentContainerStyle={styles.emptyContainer}
@@ -333,7 +334,7 @@ const styles = StyleSheet.create({
   totalLabel: { fontSize: 14, fontWeight: '700', color: '#0f172a' },
   totalValue: { fontSize: 18, fontWeight: '800', color: '#a855f7' },
   loader: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, minHeight: 300 },
+  emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, minHeight: 300, paddingBottom: 120 },
   emptyIconContainer: {
     width: 110, height: 110, borderRadius: 55,
     backgroundColor: '#faf5ff', alignItems: 'center', justifyContent: 'center',

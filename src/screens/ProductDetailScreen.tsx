@@ -8,6 +8,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { getProduct } from '../services/api';
+import { getSubcategory } from '../services/api';
 import { useCart } from '../hooks/useCart';
 import { useLanguage } from '../hooks/useLanguage';
 import { Ionicons } from '@expo/vector-icons';
@@ -34,6 +35,7 @@ interface Product {
 export default function ProductDetailScreen({ route, navigation }: Props) {
   const { productId } = route.params;
   const [product, setProduct] = useState<Product | null>(null);
+  const [subcategoryName, setSubcategoryName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [qty, setQty] = useState(1);
   const [added, setAdded] = useState(false);
@@ -41,10 +43,24 @@ export default function ProductDetailScreen({ route, navigation }: Props) {
   const { t, tProduct, tCategory } = useLanguage();
 
   useEffect(() => {
+    let mounted = true;
     getProduct(productId)
-      .then((res) => setProduct(res.data))
+      .then(async (res) => {
+        if (!mounted) return;
+        const p = res.data as Product;
+        setProduct(p);
+        if (p?.subcategory) {
+          try {
+            const subRes = await getSubcategory(p.subcategory);
+            if (mounted) setSubcategoryName(subRes.data?.name || String(p.subcategory));
+          } catch {
+            if (mounted) setSubcategoryName(String(p.subcategory));
+          }
+        }
+      })
       .catch(console.error)
-      .finally(() => setLoading(false));
+      .finally(() => { if (mounted) setLoading(false); });
+    return () => { mounted = false; };
   }, [productId]);
 
   const handleAdd = () => {
@@ -87,9 +103,9 @@ export default function ProductDetailScreen({ route, navigation }: Props) {
             ) : (
               <Text style={styles.category}>{tCategory(product.category)}</Text>
             )}
-            {product.subcategory && (
+            {subcategoryName && (
               <View style={styles.subcategoryBadge}>
-                <Text style={styles.subcategoryBadgeText}>{product.subcategory}</Text>
+                <Text style={styles.subcategoryBadgeText}>{subcategoryName}</Text>
               </View>
             )}
             <View style={styles.ratingBadge}>

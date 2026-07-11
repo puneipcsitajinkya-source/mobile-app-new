@@ -1,4 +1,5 @@
 import React from 'react';
+import { Text } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -48,8 +49,8 @@ function MainTabs() {
           shadowRadius: 12,
           elevation: 10,
         },
-        tabBarActiveTintColor: '#a855f7',
-        tabBarInactiveTintColor: '#64748b',
+        tabBarActiveTintColor: '#4b5563',
+        tabBarInactiveTintColor: '#4b5563',
         tabBarLabelStyle: { fontSize: 10, fontWeight: '600', marginTop: 2 },
       }}
     >
@@ -57,9 +58,13 @@ function MainTabs() {
         name="Home"
         component={HomeScreen}
         options={{
-          tabBarLabel: 'Shop',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'storefront' : 'storefront-outline'} size={22} color={color} />
+          tabBarLabel: () => (
+            <Text style={{ color: '#4b5563', fontSize: 10, fontWeight: '600', marginTop: 2 }}>
+              Shop
+            </Text>
+          ),
+          tabBarIcon: ({ focused }) => (
+            <Ionicons name={focused ? 'storefront' : 'storefront-outline'} size={22} color="#4b5563" />
           ),
         }}
       />
@@ -68,8 +73,8 @@ function MainTabs() {
         component={CartScreen}
         options={{
           tabBarLabel: 'Cart',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'cart' : 'cart-outline'} size={23} color={color} />
+          tabBarIcon: ({ focused }) => (
+            <Ionicons name={focused ? 'cart' : 'cart-outline'} size={23} color="#4b5563" />
           ),
           tabBarBadge: totalItems > 0 ? totalItems : undefined,
           tabBarBadgeStyle: { backgroundColor: '#a855f7', color: '#ffffff', fontSize: 10, fontWeight: '800' },
@@ -80,8 +85,8 @@ function MainTabs() {
         component={OrdersScreen}
         options={{
           tabBarLabel: 'My Orders',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'receipt' : 'receipt-outline'} size={22} color={color} />
+          tabBarIcon: ({ focused }) => (
+            <Ionicons name={focused ? 'receipt' : 'receipt-outline'} size={22} color="#4b5563" />
           ),
         }}
       />

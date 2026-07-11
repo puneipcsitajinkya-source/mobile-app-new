@@ -8,7 +8,7 @@ import PremiumImage from '../components/PremiumImage';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../navigation/AppNavigator';
-import { getProducts, getSubcategories } from '../services/api';
+import { getProducts, getSubcategories, resolveMediaUrl } from '../services/api';
 import { useCart } from '../hooks/useCart';
 import { useLanguage } from '../hooks/useLanguage';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,7 +28,15 @@ interface Product {
   unit?: string;
   image?: string;
   category: string;
+  // now storing subcategory as an id string (ObjectId)
   subcategory?: string;
+}
+
+interface Subcategory {
+  _id: string;
+  name: string;
+  icon?: string;
+  image?: string;
 }
 
 interface ProductCardProps {
@@ -89,24 +97,35 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [subcategories, setSubcategories] = useState<{ _id: string; name: string }[]>([]);
+  const [subcategories, setSubcategories] = useState<Subcategory[]>([]);
   const [selectedSubcategory, setSelectedSubcategory] = useState<string>('');
   const { addToCart, items: cart, totalItems, totalAmount: cartTotal } = useCart();
   const { tProduct } = useLanguage();
 
   const load = useCallback(async () => {
     try {
-      const prodRes = await getProducts();
-      setProducts(prodRes.data.filter((p: Product) => (p.category || '').toLowerCase() === categoryName.toLowerCase()));
-      // Load subcategories for this category
-      try {
-        const subRes = await getSubcategories(categoryName);
-        setSubcategories(subRes.data || []);
-      } catch (e) {
-        console.error('Failed to load subcategories:', e);
+      const [productResult, subcategoryResult] = await Promise.allSettled([
+        getProducts({ category: categoryName }),
+        getSubcategories(categoryName),
+      ]);
+
+      if (productResult.status === 'fulfilled') {
+        setProducts(productResult.value.data || []);
+      } else {
+        console.error('Failed to load products for category:', categoryName, productResult.reason);
+        setProducts([]);
+      }
+
+      if (subcategoryResult.status === 'fulfilled') {
+        setSubcategories(subcategoryResult.value.data || []);
+      } else {
+        console.error('Failed to load subcategories for category:', categoryName, subcategoryResult.reason);
+        setSubcategories([]);
       }
     } catch (e) {
-      console.error(e);
+      console.error('Unexpected load error:', e);
+      setProducts([]);
+      setSubcategories([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -118,7 +137,8 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
   const filteredProducts = useMemo(() => {
     let filtered = products;
     if (selectedSubcategory) {
-      filtered = filtered.filter((p) => p.subcategory === selectedSubcategory);
+      // selectedSubcategory stores subcategory _id or empty for all
+      filtered = filtered.filter((p) => (p.subcategory || '') === selectedSubcategory);
     }
     return filtered;
   }, [products, selectedSubcategory]);
@@ -151,57 +171,104 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
 
   if (loading) return <View style={styles.loaderContainer}><ActivityIndicator size="large" color="#a855f7" /></View>;
 
+  const subcategoryItems = [{ _id: 'all', name: 'All', icon: '📦' }, ...subcategories];
+
   return (
     <View style={styles.container}>
-      {subcategories.length > 0 && (
-        <View style={styles.subcategoryContainer}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.subcategoryScroll}>
-            <TouchableOpacity
-              style={[styles.subcategoryChip, !selectedSubcategory && styles.subcategoryChipActive]}
-              onPress={() => setSelectedSubcategory('')}
-            >
-              <Text style={[styles.subcategoryText, !selectedSubcategory && styles.subcategoryTextActive]}>All</Text>
-            </TouchableOpacity>
-            {subcategories.map((sub) => (
-              <TouchableOpacity
-                key={sub._id}
-                style={[styles.subcategoryChip, selectedSubcategory === sub.name && styles.subcategoryChipActive]}
-                onPress={() => setSelectedSubcategory(sub.name)}
-              >
-                <Text style={[styles.subcategoryText, selectedSubcategory === sub.name && styles.subcategoryTextActive]}>
-                  {sub.name}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-      )}
-      <FlatList
-        data={filteredProducts}
-        renderItem={renderProduct}
-        keyExtractor={item => item._id}
-        extraData={cart}
-        numColumns={2}
-        contentContainerStyle={styles.grid}
-        showsVerticalScrollIndicator={false}
-        initialNumToRender={12}
-        maxToRenderPerBatch={8}
-        windowSize={7}
-        removeClippedSubviews
-        updateCellsBatchingPeriod={50}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor="#a855f7" />}
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <View style={styles.emptyIconBox}>
-              <Ionicons name="basket-outline" size={48} color="#a855f7" />
-            </View>
-            <Text style={styles.emptyTitle}>No products found</Text>
-            <Text style={styles.emptySubText}>No items are available{selectedSubcategory ? ' in this subcategory' : ' in this category'} right now.</Text>
+      {subcategories.length > 0 ? (
+        <View style={styles.mainContent}>
+          <View style={styles.subcategoryColumn}>
+            {/* <View style={styles.subcategorySectionHeader}>
+              <Text style={styles.subcategorySectionTitle}>Subcategories</Text>
+              <Text style={styles.subcategorySectionCount}>{subcategories.length} options</Text>
+            </View> */}
+            <FlatList
+              style={{ flex: 1 }}
+              data={subcategoryItems}
+              keyExtractor={(item) => item._id}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.subcategoryList}
+              renderItem={({ item }) => {
+                const isSelected = (item._id !== 'all' && item._id === selectedSubcategory) || (item._id === 'all' && !selectedSubcategory);
+                return (
+                  <TouchableOpacity
+                    style={[styles.subcategoryCard, isSelected && styles.subcategoryCardActive, styles.subcategoryCardShadow]}
+                    onPress={() => setSelectedSubcategory(item._id === 'all' ? '' : item._id)}
+                    activeOpacity={0.8}
+                  >
+                    {resolveMediaUrl(item.image) ? (
+                      <Image source={{ uri: resolveMediaUrl(item.image)! }} style={styles.subcategoryCardImage} resizeMode="cover" />
+                    ) : (
+                      <View style={[styles.subcategoryCardIcon, isSelected && styles.subcategoryCardIconActive]}>
+                        <Text style={[styles.subcategoryCardIconText, isSelected && styles.subcategoryCardIconTextActive]}>{item.icon || '🏷️'}</Text>
+                      </View>
+                    )}
+                    <Text style={[styles.subcategoryCardLabel, isSelected && styles.subcategoryCardLabelActive]} numberOfLines={2}>
+                      {item.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              }}
+              ItemSeparatorComponent={() => <View style={styles.subcategorySeparator} />}
+            />
           </View>
-        }
-      />
-      
-      {/* STICKY CART */}
+
+          <View style={styles.productsColumn}>
+            <FlatList
+              style={styles.productList}
+              data={filteredProducts}
+              renderItem={renderProduct}
+              keyExtractor={item => item._id}
+              extraData={cart}
+              numColumns={2}
+              contentContainerStyle={styles.grid}
+              showsVerticalScrollIndicator={false}
+              initialNumToRender={12}
+              maxToRenderPerBatch={8}
+              windowSize={7}
+              removeClippedSubviews
+              updateCellsBatchingPeriod={50}
+              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor="#a855f7" />}
+              ListEmptyComponent={
+                <View style={styles.emptyState}>
+                  <View style={styles.emptyIconBox}>
+                    <Ionicons name="basket-outline" size={48} color="#a855f7" />
+                  </View>
+                  <Text style={styles.emptyTitle}>No products found</Text>
+                  <Text style={styles.emptySubText}>No items are available{selectedSubcategory ? ' in this subcategory' : ' in this category'} right now.</Text>
+                </View>
+              }
+            />
+          </View>
+        </View>
+      ) : (
+        <FlatList
+          style={styles.productList}
+          data={filteredProducts}
+          renderItem={renderProduct}
+          keyExtractor={item => item._id}
+          extraData={cart}
+          numColumns={2}
+          contentContainerStyle={styles.grid}
+          showsVerticalScrollIndicator={false}
+          initialNumToRender={12}
+          maxToRenderPerBatch={8}
+          windowSize={7}
+          removeClippedSubviews
+          updateCellsBatchingPeriod={50}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor="#a855f7" />}
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <View style={styles.emptyIconBox}>
+                <Ionicons name="basket-outline" size={48} color="#a855f7" />
+              </View>
+              <Text style={styles.emptyTitle}>No products found</Text>
+              <Text style={styles.emptySubText}>No items are available{selectedSubcategory ? ' in this subcategory' : ' in this category'} right now.</Text>
+            </View>
+          }
+        />
+      )}
+
       {totalItems > 0 && (
         <View style={styles.stickyCartWrapper}>
           <TouchableOpacity 
@@ -232,12 +299,60 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8fafc' },
   loaderContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f8fafc' },
-  subcategoryContainer: { backgroundColor: '#ffffff', borderBottomWidth: 1, borderBottomColor: '#e2e8f0', paddingVertical: 10 },
-  subcategoryScroll: { paddingHorizontal: 12, gap: 8 },
-  subcategoryChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: '#e2e8f0' },
-  subcategoryChipActive: { backgroundColor: '#a855f7', borderColor: '#a855f7' },
-  subcategoryText: { fontSize: 13, fontWeight: '600', color: '#64748b' },
-  subcategoryTextActive: { color: '#ffffff' },
+  contentArea: { flex: 1 },
+  mainContent: { flex: 1, flexDirection: 'row', backgroundColor: '#f8fafc' },
+  subcategoryColumn: { width: 96, backgroundColor: '#ffffff', paddingTop: 12, paddingBottom: 12, borderRightWidth: 1, borderRightColor: '#e2e8f0', alignItems: 'center' },
+  productsColumn: { flex: 1 },
+  subcategorySectionHeader: { paddingHorizontal: 12, marginBottom: 12 },
+  subcategorySectionTitle: { fontSize: 15, fontWeight: '800', color: '#0f172a' },
+  subcategorySectionCount: { fontSize: 11, color: '#64748b', marginTop: 4 },
+  subcategoryList: { paddingHorizontal: 6, paddingBottom: 12 },
+  subcategorySeparator: { height: 10 },
+  subcategoryCard: {
+    width: 72,
+    minHeight: 72,
+    backgroundColor: '#f8fafc',
+    borderRadius: 18,
+    paddingVertical: 8,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  subcategoryCardActive: {
+    backgroundColor: '#7c3aed',
+    borderColor: '#6d28d9',
+  },
+  subcategoryCardImage: {
+    width: 56,
+    height: 56,
+    borderRadius: 12,
+    backgroundColor: '#ede9fe',
+    marginBottom: 6,
+  },
+  subcategoryCardIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#ede9fe',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
+  },
+  subcategoryCardIconActive: { backgroundColor: '#ffffff' },
+  subcategoryCardIconText: { fontSize: 22, color: '#7c3aed' },
+  subcategoryCardIconTextActive: { color: '#a855f7' },
+  subcategoryCardLabel: { fontSize: 11, fontWeight: '700', color: '#475569', textAlign: 'center' },
+  subcategoryCardLabelActive: { color: '#ffffff' },
+  subcategoryCardShadow: {
+    shadowColor: '#7c3aed',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 14,
+    elevation: 4,
+  },
+  productList: { flex: 1 },
   grid: { padding: 10, paddingBottom: 100 },
   card: {
     flex: 1, maxWidth: '47%', margin: 6, backgroundColor: '#ffffff', borderRadius: 12,
@@ -261,7 +376,7 @@ const styles = StyleSheet.create({
   addedBtnText: { color: '#ffffff' },
   emptyState: {
     alignItems: 'center', justifyContent: 'center',
-    paddingVertical: 36, paddingHorizontal: 24,
+    paddingVertical: 36, paddingHorizontal: 24, paddingBottom: 100,
     marginTop: 30, marginHorizontal: 10,
     borderRadius: 16, backgroundColor: '#ffffff',
     borderWidth: 1, borderColor: '#e2e8f0'
