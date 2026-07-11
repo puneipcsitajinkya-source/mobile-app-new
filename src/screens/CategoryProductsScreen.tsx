@@ -3,7 +3,7 @@ import {
   View, Text, FlatList, TouchableOpacity, ScrollView,
   Image, StyleSheet, RefreshControl, ActivityIndicator
 } from 'react-native';
-import PremiumLoader from '../components/PremiumLoader';
+// import PremiumLoader from '../components/PremiumLoader';
 import PremiumImage from '../components/PremiumImage';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
@@ -368,7 +368,7 @@ const styles = StyleSheet.create({
   cardUnit: { fontSize: 11, color: '#64748b', marginBottom: 4 },
   cardName: { fontSize: 13, fontWeight: '600', color: '#0f172a', marginBottom: 8, height: 36, lineHeight: 18 },
   priceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
-  cardPrice: { fontSize: 15, fontWeight: '800', color: '#0f172a' },
+  cardPrice: { fontSize: 15, fontWeight: '800', color: '#0f172a',marginRight: 6 },
   cardMrp: { fontSize: 12, color: '#94a3b8', textDecorationLine: 'line-through', marginTop: 2 },
   addBtn: { backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#a855f7', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 4, minWidth: 50, alignItems: 'center' },
   addedBtn: { backgroundColor: '#a855f7' },
