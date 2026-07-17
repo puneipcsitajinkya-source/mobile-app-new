@@ -7,9 +7,10 @@ import {
   StyleSheet,
   ScrollView,
   Alert,
-  ActivityIndicator,
+  useWindowDimensions,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import * as Location from 'expo-location';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -19,8 +20,10 @@ import { placeOrder, getSettings } from '../services/api';
 import { useLanguage } from '../hooks/useLanguage';
 import { useNetwork } from '../hooks/useNetwork';
 import { Ionicons } from '@expo/vector-icons';
+import PremiumLoader from '../components/PremiumLoader';
 
 const STORAGE_ADDRESS_KEY = '@checkout_address';
+const STORAGE_CONTACT_KEY = '@checkout_contact';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'Checkout'> };
 
@@ -31,6 +34,7 @@ export default function CheckoutScreen({ navigation }: Props) {
   const [location, setLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [address, setAddress] = useState('');
   const [locLoading, setLocLoading] = useState(false);
+  const [locationError, setLocationError] = useState('');
   const [placing, setPlacing] = useState(false);
   const [fees, setFees] = useState({
     deliveryFeeEnabled: false,
@@ -46,7 +50,24 @@ export default function CheckoutScreen({ navigation }: Props) {
   const { isConnected } = useNetwork();
   const [checkoutDisabled, setCheckoutDisabled] = useState(false);
 
-  const storageLoaded = useRef(false);
+  const addressStorageLoaded = useRef(false);
+  const contactStorageLoaded = useRef(false);
+  const { height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const headerHeight = Math.max(60, Math.round((height - insets.top) * 0.2));
+
+  useEffect(() => {
+    navigation.setOptions({
+      headerStyle: {
+        backgroundColor: '#ffffff',
+        height: headerHeight + insets.top,
+      } as any,
+      headerTitleStyle: {
+        fontSize: 16,
+        fontWeight: '700',
+      },
+    });
+  }, [navigation, headerHeight, insets.top]);
 
   // Load saved delivery address on mount
   useEffect(() => {
@@ -55,20 +76,44 @@ export default function CheckoutScreen({ navigation }: Props) {
         if (savedAddress) setAddress(savedAddress);
       })
       .catch((err) => console.error('AsyncStorage load error:', err))
-      .finally(() => { storageLoaded.current = true; });
+      .finally(() => { addressStorageLoaded.current = true; });
+  }, []);
+
+  // Load saved contact numbers on mount
+  useEffect(() => {
+    AsyncStorage.getItem(STORAGE_CONTACT_KEY)
+      .then((savedContact) => {
+        if (!savedContact) return;
+        try {
+          const parsed = JSON.parse(savedContact);
+          if (parsed.mobile) setMobile(parsed.mobile);
+          if (parsed.confirmMobile) setConfirmMobile(parsed.confirmMobile);
+        } catch (err) {
+          console.error('AsyncStorage contact parse error:', err);
+        }
+      })
+      .catch((err) => console.error('AsyncStorage contact load error:', err))
+      .finally(() => { contactStorageLoaded.current = true; });
   }, []);
 
   // Auto-save address when it changes
   useEffect(() => {
-    if (!storageLoaded.current) return;
+    if (!addressStorageLoaded.current) return;
     AsyncStorage.setItem(STORAGE_ADDRESS_KEY, address).catch(() => {});
   }, [address]);
+
+  // Auto-save contact numbers when they change
+  useEffect(() => {
+    if (!contactStorageLoaded.current) return;
+    AsyncStorage.setItem(STORAGE_CONTACT_KEY, JSON.stringify({ mobile, confirmMobile })).catch(() => {});
+  }, [mobile, confirmMobile]);
 
   // Clear saved address and current delivery fields
   const handleClearSaved = () => {
     AsyncStorage.removeItem(STORAGE_ADDRESS_KEY).catch(() => {});
     setAddress('');
     setLocation(null);
+    setLocationError('');
   };
 
   useEffect(() => {
@@ -86,6 +131,7 @@ export default function CheckoutScreen({ navigation }: Props) {
       // Request permission
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
+        setLocationError(t('locationRequiredMsg'));
         Alert.alert(t('permissionDenied'), t('locationPermissionMsg'));
         return;
       }
@@ -97,6 +143,7 @@ export default function CheckoutScreen({ navigation }: Props) {
           latitude: lastKnown.coords.latitude,
           longitude: lastKnown.coords.longitude,
         });
+        setLocationError('');
       }
 
       // Helper to fetch location with timeout
@@ -121,12 +168,15 @@ export default function CheckoutScreen({ navigation }: Props) {
           latitude: fresh.coords.latitude,
           longitude: fresh.coords.longitude,
         });
+        setLocationError('');
       } else {
-        Alert.alert(t(' '), t('locationErrorMsg'));
+        setLocationError(t('locationRequiredMsg'));
+        Alert.alert(t('errorTitle'), t('locationErrorMsg'));
       }
     } catch (e) {
       console.error('Location error:', e);
-      Alert.alert(t(' '), t('locationErrorMsg'));
+      setLocationError(t('locationRequiredMsg'));
+      Alert.alert(t('errorTitle'), t('locationErrorMsg'));
     } finally {
       setLocLoading(false);
     }
@@ -134,23 +184,28 @@ export default function CheckoutScreen({ navigation }: Props) {
 
   const handlePlaceOrder = async () => {
     if (checkoutDisabled) {
-      Alert.alert(t(' '), t('cartUnavailableMsg'));
+      Alert.alert(t('errorTitle'), t('cartUnavailableMsg'));
       return;
     }
     if (items.length === 0) {
-      Alert.alert(t(' '), t('cartEmptyMsg'));
+      Alert.alert(t('errorTitle'), t('cartEmptyMsg'));
       return;
     }
     if (!isConnected) {
-      Alert.alert(t(' '), t('cartUnavailableMsg'));
+      Alert.alert(t('errorTitle'), t('cartUnavailableMsg'));
       return;
     }
     if (!mobile || mobile.length < 10) {
-      Alert.alert(t(' '), t('invalidMobileMsg'));
+      Alert.alert(t('errorTitle'), t('invalidMobileMsg'));
       return;
     }
     if (confirmMobile !== mobile) {
-      Alert.alert(t(' '), 'Contact numbers do not match. Please confirm your number.');
+      Alert.alert(t('errorTitle'), 'Contact numbers do not match. Please confirm your number.');
+      return;
+    }
+    if (!location) {
+      setLocationError(t('locationRequiredMsg'));
+      Alert.alert(t('errorTitle'), t('locationRequiredMsg'));
       return;
     }
     const subtotal = Number(totalAmount);
@@ -185,7 +240,7 @@ export default function CheckoutScreen({ navigation }: Props) {
       navigation.replace('Success', { orderId: res.data._id });
     } catch {
       const message = !isConnected ? t('cartUnavailableMsg') : t('orderFailedMsg');
-      Alert.alert(t(' '), message);
+      Alert.alert(t('errorTitle'), message);
     } finally {
       setPlacing(false);
     }
@@ -307,10 +362,10 @@ export default function CheckoutScreen({ navigation }: Props) {
             </View>
           </View>
         ) : (
-          <TouchableOpacity style={styles.locationBtn} onPress={handleGetLocation} disabled={locLoading}>
+          <TouchableOpacity style={[styles.locationBtn, locationError ? styles.locationBtnError : null]} onPress={handleGetLocation} disabled={locLoading}>
             {locLoading ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <ActivityIndicator size="small" color="#a855f7" />
+                <PremiumLoader size="xsmall" fullScreen={false} />
                 <Text style={styles.locationBtnText}>Getting location...</Text>
               </View>
             ) : (
@@ -321,6 +376,7 @@ export default function CheckoutScreen({ navigation }: Props) {
             )}
           </TouchableOpacity>
         )}
+        {locationError ? <Text style={styles.errorText}>{locationError}</Text> : null}
       </View>
 
       {/* Order Summary */}
@@ -409,8 +465,8 @@ export default function CheckoutScreen({ navigation }: Props) {
         activeOpacity={0.85}
       >
         {placing ? (
-          <View style={styles.placeBtnContent}>
-            <ActivityIndicator size="small" color="#ffffff" />
+          <View style={[styles.placeBtnContent, styles.placeBtnLoadingContent]}>
+            <PremiumLoader size="xsmall" fullScreen={false} />
             <Text style={styles.placeBtnText} numberOfLines={1}>{t('placeOrder')}</Text>
           </View>
         ) : (
@@ -421,7 +477,7 @@ export default function CheckoutScreen({ navigation }: Props) {
         )}
       </TouchableOpacity>
 
-      <View style={{ height: 40 }} />
+      <View style={{ height: 56, marginBottom: 16 }} />
     </ScrollView>
   );
 }
@@ -468,6 +524,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#faf5ff', borderWidth: 1.5, borderColor: '#a855f7',
     borderRadius: 10, paddingVertical: 14, alignItems: 'center', justifyContent: 'center', borderStyle: 'dashed',
   },
+  locationBtnError: {
+    borderColor: '#ef4444',
+    backgroundColor: '#fef2f2',
+  },
   locationBtnText: { color: '#a855f7', fontSize: 15, fontWeight: '700' },
   locationBox: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
@@ -505,6 +565,7 @@ const styles = StyleSheet.create({
   },
   placeBtnDisabled: { backgroundColor: '#d8b4fe', shadowOpacity: 0 },
   placeBtnContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', flex: 1 },
+  placeBtnLoadingContent: { gap: 6, marginTop: 0 },
   placeBtnText: { color: '#fff', fontSize: 16, fontWeight: '800', textAlign: 'center', flexShrink: 1, flexWrap: 'wrap' },
   clearBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8, alignSelf: 'flex-end' },
   clearBtnText: { fontSize: 12, color: '#94a3b8', fontWeight: '500' },

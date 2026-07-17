@@ -1,15 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, Image, StyleSheet,
-  ScrollView, ActivityIndicator
+  ScrollView
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useCart } from '../hooks/useCart';
 import { useLanguage } from '../hooks/useLanguage';
-import { getSettings } from '../services/api';
+import { getSettings, resolveMediaUrl } from '../services/api';
 import { Ionicons } from '@expo/vector-icons';
-import PremiumImage from '../components/PremiumImage';
+import PremiumLoader from '../components/PremiumLoader';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'Main'> };
 
@@ -76,11 +76,9 @@ export default function CartScreen({ navigation }: Props) {
       </View>
 
       {loading ? (
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-          <ActivityIndicator size="large" color="#a855f7" />
-        </View>
+        <PremiumLoader message="Loading cart" subMessage="Preparing your order" fullScreen />
       ) : (
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 75 }} showsVerticalScrollIndicator={false}>
           {/* Delivery Promise */}
           <View style={styles.deliveryBox}>
             <View style={styles.deliveryBoxIcon}>
@@ -96,12 +94,13 @@ export default function CartScreen({ navigation }: Props) {
           <View style={styles.section}>
             {items.map((item) => (
               <View key={item._id} style={styles.row}>
-                <PremiumImage
-                  uri={item.image}
-                  style={styles.img}
-                  iconName="leaf-outline"
-                  iconSize={20}
-                />
+                {resolveMediaUrl(item.image) ? (
+                  <Image source={{ uri: resolveMediaUrl(item.image)! }} style={styles.img} resizeMode="cover" />
+                ) : (
+                  <View style={[styles.img, styles.imgPlaceholder]}>
+                    <Ionicons name="image-outline" size={20} color="#cbd5e1" />
+                  </View>
+                )}
                 <View style={styles.info}>
                   <Text style={styles.itemName} numberOfLines={2}>{tProduct(item.name)}</Text>
                   <Text style={styles.itemPrice}>₹{item.price}</Text>
@@ -256,7 +255,7 @@ const styles = StyleSheet.create({
   checkoutAmount: { color: '#ffffff', fontSize: 16, fontWeight: '800', marginBottom: 2 },
   checkoutSub: { color: '#ffffff', fontSize: 10, fontWeight: '700', opacity: 0.8 },
   checkoutBtnText: { color: '#fff', fontSize: 16, fontWeight: '800' },
-  empty: { flex: 1, backgroundColor: '#f1f5f9', alignItems: 'center', justifyContent: 'center', padding: 30, paddingBottom: 120 },
+  empty: { flex: 1, backgroundColor: '#f1f5f9', alignItems: 'center', justifyContent: 'center', padding: 30, paddingBottom: 80 },
   emptyIconContainer: {
     width: 110, height: 110, borderRadius: 55, backgroundColor: '#faf5ff', alignItems: 'center', justifyContent: 'center',
     marginBottom: 20, borderWidth: 2, borderColor: '#f3e8ff',

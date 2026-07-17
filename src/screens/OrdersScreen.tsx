@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, FlatList,
-  StyleSheet, RefreshControl, ScrollView, ActivityIndicator,
+  StyleSheet, RefreshControl, ScrollView,
 } from 'react-native';
 import { getOrdersByMobile, getSettings } from '../services/api';
 import { useLanguage } from '../hooks/useLanguage';
 import { Ionicons } from '@expo/vector-icons';
 import { useCart } from '../hooks/useCart';
 import { useNetwork } from '../hooks/useNetwork';
+import PremiumLoader from '../components/PremiumLoader';
 
 interface OrderItem {
   productId: string;
@@ -234,9 +235,7 @@ export default function OrdersScreen() {
 
       {/* Orders List */}
       {loading ? (
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 40 }}>
-          <ActivityIndicator size="large" color="#a855f7" />
-        </View>
+        <PremiumLoader message="Loading orders" subMessage="Checking your recent purchases" fullScreen />
       ) : orders.length === 0 ? (
         <ScrollView
           contentContainerStyle={styles.emptyContainer}
@@ -298,7 +297,7 @@ const styles = StyleSheet.create({
   },
   contactText: { fontSize: 14, color: '#6b21a8', lineHeight: 20, fontWeight: '500' },
   contactPhone: { fontWeight: '800', color: '#a855f7' },
-  listContainer: { padding: 16, paddingBottom: 32 },
+  listContainer: { padding: 16, paddingBottom: 75 },
   orderCard: {
     backgroundColor: '#ffffff', borderRadius: 16, padding: 16, marginBottom: 12,
     borderWidth: 1, borderColor: '#e2e8f0',
@@ -334,7 +333,7 @@ const styles = StyleSheet.create({
   totalLabel: { fontSize: 14, fontWeight: '700', color: '#0f172a' },
   totalValue: { fontSize: 18, fontWeight: '800', color: '#a855f7' },
   loader: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, minHeight: 300, paddingBottom: 120 },
+  emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, minHeight: 300, paddingBottom: 80 },
   emptyIconContainer: {
     width: 110, height: 110, borderRadius: 55,
     backgroundColor: '#faf5ff', alignItems: 'center', justifyContent: 'center',

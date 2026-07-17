@@ -1,9 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, Image, ScrollView, TouchableOpacity,
-  StyleSheet, ActivityIndicator,
+  StyleSheet,
 } from 'react-native';
-import PremiumImage from '../components/PremiumImage';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../navigation/AppNavigator';
@@ -79,18 +78,29 @@ export default function ProductDetailScreen({ route, navigation }: Props) {
     navigation.navigate('Checkout');
   };
 
-  if (loading) return <View style={styles.container}><ActivityIndicator size="large" color="#a855f7" /></View>;
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.loadingState}>
+          <Ionicons name="leaf-outline" size={40} color="#a855f7" />
+          <Text style={styles.loadingText}>Loading product...</Text>
+        </View>
+      </View>
+    );
+  }
+
   if (!product) return <View style={styles.container}><Text style={styles.errorText}>{t('productNotFound')}</Text></View>;
 
   return (
     <View style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
-        <PremiumImage
-          uri={product.image}
-          style={styles.image}
-          iconName="leaf-outline"
-          iconSize={56}
-        />
+        {product.image ? (
+          <Image source={{ uri: product.image }} style={styles.image} resizeMode="contain" />
+        ) : (
+          <View style={[styles.image, styles.imagePlaceholder]}>
+            <Ionicons name="leaf-outline" size={56} color="#a855f7" />
+          </View>
+        )}
         {(product.discount ?? 0) > 0 && (
           <View style={styles.imageDiscountBadge}>
             <Text style={styles.imageDiscountText}>{product.discount}% OFF</Text>
@@ -208,6 +218,8 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8fafc' },
   image: { width: '100%', height: 240, resizeMode: 'contain', backgroundColor: '#ffffff' },
   imagePlaceholder: { width: '100%', height: 240, backgroundColor: '#f8fafc', alignItems: 'center', justifyContent: 'center' },
+  loadingState: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f8fafc' },
+  loadingText: { marginTop: 12, color: '#64748b', fontWeight: '600' },
   content: { padding: 20, backgroundColor: '#ffffff', borderTopLeftRadius: 24, borderTopRightRadius: 24, marginTop: -20, minHeight: 400 },
   badgeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 8, flexWrap: 'wrap' },
   category: { fontSize: 12, color: '#a855f7', fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1 },
@@ -248,7 +260,7 @@ const styles = StyleSheet.create({
   },
   totalLabel: { fontSize: 15, color: '#475569', fontWeight: '600' },
   totalValue: { fontSize: 22, fontWeight: '800', color: '#a855f7' },
-  footer: { padding: 16, paddingBottom: 28, backgroundColor: '#ffffff', borderTopWidth: 1, borderTopColor: '#f1f5f9', flexDirection: 'row', gap: 12 },
+  footer: { padding: 16, paddingBottom: 48, backgroundColor: '#ffffff', borderTopWidth: 1, borderTopColor: '#f1f5f9', flexDirection: 'row', gap: 12 },
   addBtn: { flex: 1, backgroundColor: '#faf5ff', borderWidth: 1.5, borderColor: '#a855f7', borderRadius: 14, paddingVertical: 16, alignItems: 'center', justifyContent: 'center' },
   addedBtn: { backgroundColor: '#7c3aed', borderColor: '#7c3aed' },
   addBtnText: { color: '#a855f7', fontSize: 15, fontWeight: '800' },

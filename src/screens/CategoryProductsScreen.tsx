@@ -1,10 +1,9 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, ScrollView,
-  Image, StyleSheet, RefreshControl, ActivityIndicator
+  Image, StyleSheet, RefreshControl
 } from 'react-native';
-// import PremiumLoader from '../components/PremiumLoader';
-import PremiumImage from '../components/PremiumImage';
+import StickyCart from '../components/StickyCart';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../navigation/AppNavigator';
@@ -55,12 +54,13 @@ const ProductCard = React.memo(function ProductCard({ item, qty, onPress, onAdd,
       activeOpacity={0.9}
     >
       <View style={styles.cardImgContainer}>
-        <PremiumImage
-          uri={item.image}
-          style={styles.cardImg}
-          iconName="leaf-outline"
-          iconSize={32}
-        />
+        {item.image ? (
+          <Image source={{ uri: item.image }} style={styles.cardImg} resizeMode="cover" />
+        ) : (
+          <View style={[styles.cardImg, styles.cardImgPlaceholder]}>
+            <Ionicons name="leaf-outline" size={28} color="#a855f7" />
+          </View>
+        )}
         {(item.discount ?? 0) > 0 && (
           <View style={styles.discountBadge}>
             <Text style={styles.discountText}>{item.discount}% OFF</Text>
@@ -103,6 +103,9 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
   const { tProduct } = useLanguage();
 
   const load = useCallback(async () => {
+    setLoading(true);
+    setRefreshing(true);
+
     try {
       const [productResult, subcategoryResult] = await Promise.allSettled([
         getProducts({ category: categoryName }),
@@ -122,13 +125,17 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
         console.error('Failed to load subcategories for category:', categoryName, subcategoryResult.reason);
         setSubcategories([]);
       }
+
+      if (productResult.status === 'fulfilled' || subcategoryResult.status === 'fulfilled') {
+        setLoading(false);
+      }
     } catch (e) {
       console.error('Unexpected load error:', e);
       setProducts([]);
       setSubcategories([]);
     } finally {
-      setLoading(false);
       setRefreshing(false);
+      setLoading(false);
     }
   }, [categoryName]);
 
@@ -169,7 +176,14 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
     );
   }, [getProductQty, handleAdd, handleProductPress, tProduct]);
 
-  if (loading) return <View style={styles.loaderContainer}><ActivityIndicator size="large" color="#a855f7" /></View>;
+  if (loading) {
+    return (
+      <View style={styles.loaderContainer}>
+        <Ionicons name="leaf-outline" size={40} color="#a855f7" />
+        <Text style={styles.loaderText}>Loading products...</Text>
+      </View>
+    );
+  }
 
   const subcategoryItems = [{ _id: 'all', name: 'All', icon: '📦' }, ...subcategories];
 
@@ -269,29 +283,12 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
         />
       )}
 
-      {totalItems > 0 && (
-        <View style={styles.stickyCartWrapper}>
-          <TouchableOpacity 
-            style={styles.stickyCart}
-            activeOpacity={0.9}
-            onPress={() => navigation.navigate('Cart' as any)}
-          >
-            <View style={styles.cartInfo}>
-              <View style={styles.cartIconWrapper}>
-                <Ionicons name="cart" size={20} color="#a855f7" />
-              </View>
-              <View>
-                <Text style={styles.cartItemsText}>{totalItems} item{totalItems > 1 ? 's' : ''}</Text>
-                <Text style={styles.cartTotalText}>₹{cartTotal}</Text>
-              </View>
-            </View>
-            <View style={styles.cartAction}>
-              <Text style={styles.cartActionText}>View Cart</Text>
-              <Ionicons name="caret-forward" size={16} color="#ffffff" />
-            </View>
-          </TouchableOpacity>
-        </View>
-      )}
+      <StickyCart
+        totalItems={totalItems}
+        cartTotal={cartTotal}
+        onPress={() => navigation.navigate('Cart' as any)}
+        tintColor="#a855f7"
+      />
     </View>
   );
 }
@@ -299,6 +296,7 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8fafc' },
   loaderContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f8fafc' },
+  loaderText: { marginTop: 12, color: '#64748b', fontWeight: '600' },
   contentArea: { flex: 1 },
   mainContent: { flex: 1, flexDirection: 'row', backgroundColor: '#f8fafc' },
   subcategoryColumn: { width: 96, backgroundColor: '#ffffff', paddingTop: 12, paddingBottom: 12, borderRightWidth: 1, borderRightColor: '#e2e8f0', alignItems: 'center' },
@@ -353,7 +351,7 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   productList: { flex: 1 },
-  grid: { padding: 10, paddingBottom: 100 },
+  grid: { padding: 10, paddingBottom: 75 },
   card: {
     flex: 1, maxWidth: '47%', margin: 6, backgroundColor: '#ffffff', borderRadius: 12,
     borderWidth: 1, borderColor: '#e2e8f0', overflow: 'hidden',
@@ -376,7 +374,7 @@ const styles = StyleSheet.create({
   addedBtnText: { color: '#ffffff' },
   emptyState: {
     alignItems: 'center', justifyContent: 'center',
-    paddingVertical: 36, paddingHorizontal: 24, paddingBottom: 100,
+    paddingVertical: 36, paddingHorizontal: 24, paddingBottom: 36,
     marginTop: 30, marginHorizontal: 10,
     borderRadius: 16, backgroundColor: '#ffffff',
     borderWidth: 1, borderColor: '#e2e8f0'
@@ -388,12 +386,5 @@ const styles = StyleSheet.create({
   emptyTitle: { color: '#0f172a', fontSize: 17, fontWeight: '800', marginBottom: 6 },
   emptySubText: { color: '#64748b', fontSize: 13, textAlign: 'center', lineHeight: 20 },
   emptyText: { color: '#64748b', fontSize: 16, marginTop: 12, textAlign: 'center' },
-  stickyCartWrapper: { position: 'absolute', bottom: 20, left: 16, right: 16, zIndex: 100 },
-  stickyCart: { backgroundColor: '#a855f7', borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 12, shadowColor: '#a855f7', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 6 },
-  cartInfo: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  cartIconWrapper: { backgroundColor: '#ffffff', width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  cartItemsText: { color: '#ffffff', fontSize: 12, fontWeight: '600', opacity: 0.9 },
-  cartTotalText: { color: '#ffffff', fontSize: 16, fontWeight: '800' },
-  cartAction: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  cartActionText: { color: '#ffffff', fontSize: 14, fontWeight: '700' },
+
 });

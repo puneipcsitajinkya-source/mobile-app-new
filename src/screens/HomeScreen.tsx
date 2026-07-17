@@ -2,9 +2,10 @@ import React, { useEffect, useState, useCallback, useMemo, useRef, memo } from '
 import {
   View, Text, FlatList, TextInput, TouchableOpacity,
   Image, StyleSheet, RefreshControl, Dimensions,
-  Platform, Modal, ActivityIndicator
+  Platform, Modal
 } from 'react-native';
-import PremiumImage from '../components/PremiumImage';
+import PremiumLoader from '../components/PremiumLoader';
+import StickyCart from '../components/StickyCart';
 import { CompositeNavigationProp } from '@react-navigation/native';
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -14,9 +15,6 @@ import { useCart } from '../hooks/useCart';
 import { useLanguage } from '../hooks/useLanguage';
 import { useNetwork } from '../hooks/useNetwork';
 import { Ionicons } from '@expo/vector-icons';
-
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const APP_LOGO = require('../../assets/icon.png');
 
 type Props = {
   navigation: CompositeNavigationProp<
@@ -97,12 +95,13 @@ const ProductCard = memo(function ProductCard({
       activeOpacity={0.9}
     >
       <View style={styles.cardImgContainer}>
-        <PremiumImage
-          uri={item.image}
-          style={styles.cardImg}
-          iconName="leaf-outline"
-          iconSize={28}
-        />
+        {item.image ? (
+          <Image source={{ uri: item.image }} style={styles.cardImg} />
+        ) : (
+          <View style={[styles.cardImg, styles.cardImgPlaceholder]}>
+            <Ionicons name="leaf-outline" size={28} color="#a855f7" />
+          </View>
+        )}
         {(item.discount ?? 0) > 0 && (
           <View style={styles.discountBadge}>
             <Text style={styles.discountText}>{item.discount}% OFF</Text>
@@ -155,8 +154,11 @@ export default function HomeScreen({ navigation }: Props) {
   const [langModalVisible, setLangModalVisible] = useState(false);
   const { language, setLanguage, translating, tProduct, tCategory } = useLanguage();
   const { onReconnect } = useNetwork();
+  const APP_LOGO = require('../../assets/icon.png');
 
   const load = useCallback(async () => {
+    const startedAt = Date.now();
+
     try {
       const [prodRes, catRes] = await Promise.all([getProducts(), getCategories()]);
       setProducts(prodRes.data);
@@ -164,6 +166,13 @@ export default function HomeScreen({ navigation }: Props) {
     } catch (e) {
       console.error(e);
     } finally {
+      const elapsed = Date.now() - startedAt;
+      const remaining = Math.max(0, 900 - elapsed);
+
+      if (remaining > 0) {
+        await new Promise((resolve) => setTimeout(resolve, remaining));
+      }
+
       setLoading(false);
       setRefreshing(false);
     }
@@ -337,12 +346,7 @@ export default function HomeScreen({ navigation }: Props) {
             >
               <View style={styles.catGridImgContainer}>
                 {cat.image ? (
-                  <PremiumImage
-                    uri={cat.image}
-                    style={styles.catGridImg}
-                    iconName="grid-outline"
-                    iconSize={22}
-                  />
+                  <Image source={{ uri: cat.image }} style={styles.catGridImg} />
                 ) : (
                   <Text style={styles.catGridIcon}>{cat.icon}</Text>
                 )}
@@ -367,9 +371,12 @@ export default function HomeScreen({ navigation }: Props) {
 
   if (loading) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f1f5f9' }}>
-        <ActivityIndicator size="large" color="#7c3aed" />
-      </View>
+      <PremiumLoader
+        message="Loading fresh picks"
+        subMessage="Fetching the best deals for you"
+        size="large"
+        fullScreen
+      />
     );
   }
 
@@ -380,9 +387,9 @@ export default function HomeScreen({ navigation }: Props) {
         <View style={styles.headerTop}>
           <View style={styles.headerLeft}>
             <View style={styles.headerBrand}>
-              <Image source={APP_LOGO} style={styles.headerLogo} />
+                  <Image source={APP_LOGO} style={styles.headerLogo} />
               <View>
-                <Text style={styles.deliveryTitle}>Firstmart</Text>
+                <Text style={styles.deliveryTitle}>Firstmartt</Text>
                 <Text style={styles.deliverySubtitle}>Delivery in 10 minutes</Text>
               </View>
             </View>
@@ -417,7 +424,7 @@ export default function HomeScreen({ navigation }: Props) {
         renderItem={renderCategoryGroup}
         ListHeaderComponent={listHeaderComponent}
         ListFooterComponent={search && productsByCategory.length === 0 ? emptyStateComponent : null}
-        contentContainerStyle={{ paddingBottom: 100 }}
+        contentContainerStyle={{ paddingBottom: 140 }}
         showsVerticalScrollIndicator={false}
         refreshing={refreshing}
         onRefresh={() => { setRefreshing(true); load(); }}
@@ -431,30 +438,12 @@ export default function HomeScreen({ navigation }: Props) {
         scrollEventThrottle={16}
       />
 
-      {/* STICKY CART */}
-      {totalItems > 0 && (
-        <View style={styles.stickyCartWrapper}>
-          <TouchableOpacity
-            style={styles.stickyCart}
-            activeOpacity={0.9}
-            onPress={() => navigation.navigate('Cart' as any)}
-          >
-            <View style={styles.cartInfo}>
-              <View style={styles.cartIconWrapper}>
-                <Ionicons name="cart" size={20} color="#4b5563" />
-              </View>
-              <View>
-                <Text style={styles.cartItemsText}>{totalItems} item{totalItems > 1 ? 's' : ''}</Text>
-                <Text style={styles.cartTotalText}>₹{cartTotal}</Text>
-              </View>
-            </View>
-            <View style={styles.cartAction}>
-              <Text style={styles.cartActionText}>View Cart</Text>
-              <Ionicons name="caret-forward" size={16} color="#4b5563" />
-            </View>
-          </TouchableOpacity>
-        </View>
-      )}
+      <StickyCart
+        totalItems={totalItems}
+        cartTotal={cartTotal}
+        onPress={() => navigation.navigate('Cart' as any)}
+        tintColor="#7c3aed"
+      />
       {/* Language Selection Modal */}
       <Modal
         visible={langModalVisible}
@@ -513,9 +502,12 @@ export default function HomeScreen({ navigation }: Props) {
       {/* Translating Spinner Overlay */}
       {translating && (
         <View style={styles.translatingOverlay}>
-          <ActivityIndicator size="large" color="#7c3aed" />
-          <Text style={styles.translatingText}>Translating application...</Text>
-          <Text style={styles.translatingSubText}>कृपया प्रतीक्षा करा / कृपया प्रतीक्षा करें</Text>
+          <PremiumLoader
+            message="Translating application"
+            subMessage="कृपया प्रतीक्षा करा / कृपया प्रतीक्षा करें"
+            size="medium"
+            fullScreen={false}
+          />
         </View>
       )}
     </View>
@@ -544,6 +536,20 @@ const styles = StyleSheet.create({
     height: 36,
     borderRadius: 8,
     marginRight: 10,
+  },
+  headerLogoFallback: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    marginRight: 10,
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerLogoText: {
+    color: '#7c3aed',
+    fontSize: 18,
+    fontWeight: '800',
   },
   deliveryTitle: { color: '#ffffff', fontSize: 18, fontWeight: '800', lineHeight: 20 },
   deliverySubtitle: { color: 'rgba(255,255,255,0.8)', fontSize: 11, fontWeight: '500', lineHeight: 14 },
@@ -688,24 +694,6 @@ const styles = StyleSheet.create({
   emptyTitle: { color: '#0f172a', fontSize: 17, fontWeight: '800', marginBottom: 6 },
   emptySubText: { color: '#64748b', fontSize: 13, textAlign: 'center', lineHeight: 20 },
   emptyText: { color: '#64748b', fontSize: 16, marginTop: 12 },
-  stickyCartWrapper: {
-    position: 'absolute', bottom: 20, left: 16, right: 16,
-    zIndex: 100,
-  },
-  stickyCart: {
-    backgroundColor: '#7c3aed', borderRadius: 12, flexDirection: 'row',
-    alignItems: 'center', justifyContent: 'space-between', padding: 12,
-    shadowColor: '#7c3aed', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 6
-  },
-  cartInfo: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  cartIconWrapper: {
-    backgroundColor: '#ffffff', width: 36, height: 36, borderRadius: 18,
-    alignItems: 'center', justifyContent: 'center'
-  },
-  cartItemsText: { color: '#ffffff', fontSize: 12, fontWeight: '600', opacity: 0.9 },
-  cartTotalText: { color: '#ffffff', fontSize: 16, fontWeight: '800' },
-  cartAction: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  cartActionText: { color: '#ffffff', fontSize: 14, fontWeight: '700' },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',

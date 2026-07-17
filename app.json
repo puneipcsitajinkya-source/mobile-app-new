@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "FirstMart",
+    "name": "FirstMartt",
     "slug": "firstmart",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -15,13 +15,20 @@
           }
         }
       ],
-      "expo-font"
+      "expo-font",
+      "expo-status-bar",
+      "expo-splash-screen"
     ],
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "We need your location to calculate delivery fees and show the delivery address on the map."
       }
+    },
+    "splash": {
+      "image": "./assets/transparent.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#f8fafc"
     },
     "android": {
       "package": "firstmart.app",

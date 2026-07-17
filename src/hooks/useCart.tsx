@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export interface CartItem {
   _id: string;
@@ -25,10 +26,24 @@ interface CartContextType {
 }
 
 const CartContext = createContext<CartContextType | null>(null);
+const STORAGE_LATEST_ORDER_KEY = '@latest_order';
 
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = useState<CartItem[]>([]);
-  const [latestOrder, setLatestOrder] = useState<any | null>(null);
+  const [latestOrder, setLatestOrderState] = useState<any | null>(null);
+
+  useEffect(() => {
+    AsyncStorage.getItem(STORAGE_LATEST_ORDER_KEY)
+      .then((savedOrder) => {
+        if (!savedOrder) return;
+        try {
+          setLatestOrderState(JSON.parse(savedOrder));
+        } catch (err) {
+          console.error('Failed to parse saved order:', err);
+        }
+      })
+      .catch((err) => console.error('Failed to load saved order:', err));
+  }, []);
 
   const addToCart = useCallback((product: Omit<CartItem, 'quantity'>) => {
     setItems((prev) => {
@@ -61,6 +76,15 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const clearCart = useCallback(() => setItems([]), []);
+
+  const setLatestOrder = useCallback((order: any | null) => {
+    setLatestOrderState(order);
+    if (order) {
+      AsyncStorage.setItem(STORAGE_LATEST_ORDER_KEY, JSON.stringify(order)).catch(() => {});
+    } else {
+      AsyncStorage.removeItem(STORAGE_LATEST_ORDER_KEY).catch(() => {});
+    }
+  }, []);
 
   const totalAmount = items.reduce((sum, i) => sum + i.price * i.quantity, 0);
   const totalMrp = items.reduce((sum, i) => sum + ((i.mrp && i.mrp > i.price) ? i.mrp : i.price) * i.quantity, 0);

@@ -29,6 +29,36 @@ export type TabParamList = {
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<TabParamList>();
+const HomeStackNav = createNativeStackNavigator<HomeStackParamList>();
+
+export type HomeStackParamList = {
+  HomeMain: undefined;
+  ProductDetail: { productId: string };
+  CategoryProducts: { categoryName: string };
+};
+
+function HomeStackScreen() {
+  return (
+    <HomeStackNav.Navigator
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: '#f1f5f9' },
+      }}
+    >
+      <HomeStackNav.Screen name="HomeMain" component={HomeScreen} />
+      <HomeStackNav.Screen
+        name="ProductDetail"
+        component={ProductDetailScreen}
+        options={{ title: 'Product Details', headerShown: true }}
+      />
+      <HomeStackNav.Screen
+        name="CategoryProducts"
+        component={CategoryProductsScreen}
+        options={({ route }) => ({ title: route.params.categoryName, headerShown: true })}
+      />
+    </HomeStackNav.Navigator>
+  );
+}
 
 function MainTabs() {
   const { totalItems } = useCart();
@@ -40,14 +70,14 @@ function MainTabs() {
         tabBarStyle: {
           backgroundColor: '#ffffff',
           borderTopColor: '#f1f5f9',
-          paddingBottom: 10,
-          paddingTop: 8,
-          height: 66,
+          paddingBottom: 30,
+          paddingTop: 6,
+          height: 84,
           shadowColor: '#0f172a',
-          shadowOffset: { width: 0, height: -4 },
+          shadowOffset: { width: 0, height: -3 },
           shadowOpacity: 0.05,
-          shadowRadius: 12,
-          elevation: 10,
+          shadowRadius: 8,
+          elevation: 8,
         },
         tabBarActiveTintColor: '#4b5563',
         tabBarInactiveTintColor: '#4b5563',
@@ -56,13 +86,9 @@ function MainTabs() {
     >
       <Tab.Screen
         name="Home"
-        component={HomeScreen}
+        component={HomeStackScreen}
         options={{
-          tabBarLabel: () => (
-            <Text style={{ color: '#4b5563', fontSize: 10, fontWeight: '600', marginTop: 2 }}>
-              Shop
-            </Text>
-          ),
+          tabBarLabel: 'Shop',
           tabBarIcon: ({ focused }) => (
             <Ionicons name={focused ? 'storefront' : 'storefront-outline'} size={22} color="#4b5563" />
           ),
@@ -77,7 +103,7 @@ function MainTabs() {
             <Ionicons name={focused ? 'cart' : 'cart-outline'} size={23} color="#4b5563" />
           ),
           tabBarBadge: totalItems > 0 ? totalItems : undefined,
-          tabBarBadgeStyle: { backgroundColor: '#a855f7', color: '#ffffff', fontSize: 10, fontWeight: '800' },
+          tabBarBadgeStyle: { backgroundColor: '#a855f7', color: '#ffffff', fontSize: 9, fontWeight: '800' },
         }}
       />
       <Tab.Screen
@@ -108,8 +134,6 @@ export default function AppNavigator() {
         }}
       >
         <Stack.Screen name="Main" component={MainTabs} options={{ headerShown: false }} />
-        <Stack.Screen name="ProductDetail" component={ProductDetailScreen} options={{ title: 'Product Details' }} />
-        <Stack.Screen name="CategoryProducts" component={CategoryProductsScreen} options={({ route }) => ({ title: route.params.categoryName })} />
         <Stack.Screen name="Checkout" component={CheckoutScreen} options={{ title: 'Checkout' }} />
         <Stack.Screen name="Success" component={SuccessScreen} options={{ headerShown: false }} />
       </Stack.Navigator>

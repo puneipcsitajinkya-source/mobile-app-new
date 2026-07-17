@@ -8,7 +8,7 @@ interface LoaderProps {
   /** Sub-message / hint text */
   subMessage?: string;
   /** Size variant */
-  size?: 'small' | 'medium' | 'large';
+  size?: 'xsmall' | 'small' | 'medium' | 'large';
   /** If true, renders as full-screen overlay; otherwise inline */
   fullScreen?: boolean;
   /** Icon name from Ionicons to show inside the spinner */
@@ -30,8 +30,9 @@ export default function PremiumLoader({
   const dotAnim3 = useRef(new Animated.Value(0.3)).current;
 
   const sizeConfig = {
-    small: { ring: 40, iconSize: 16, dotSize: 4 },
-    medium: { ring: 60, iconSize: 24, dotSize: 5 },
+    xsmall: { ring: 24, iconSize: 12, dotSize: 3 },
+    small: { ring: 32, iconSize: 14, dotSize: 3 },
+    medium: { ring: 56, iconSize: 22, dotSize: 4 },
     large: { ring: 80, iconSize: 32, dotSize: 6 },
   };
 
@@ -169,7 +170,7 @@ const styles = StyleSheet.create({
   ringContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 20,
+    marginBottom: 0,
   },
   ring: {
     position: 'absolute',
