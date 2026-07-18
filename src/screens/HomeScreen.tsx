@@ -1,16 +1,18 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef, memo } from 'react';
 import {
   View, Text, FlatList, TextInput, TouchableOpacity,
-  Image, StyleSheet, RefreshControl, Dimensions,
-  Platform, Modal
+  StyleSheet, RefreshControl, Dimensions,
+  Animated, Easing, Platform, Modal, Image
 } from 'react-native';
+import PremiumImage from '../components/PremiumImage';
+import * as SplashScreen from 'expo-splash-screen';
 import PremiumLoader from '../components/PremiumLoader';
 import StickyCart from '../components/StickyCart';
 import { CompositeNavigationProp } from '@react-navigation/native';
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList, TabParamList } from '../navigation/AppNavigator';
-import { getProducts, getCategories } from '../services/api';
+import { getProducts, getCategories, resolveMediaUrl } from '../services/api';
 import { useCart } from '../hooks/useCart';
 import { useLanguage } from '../hooks/useLanguage';
 import { useNetwork } from '../hooks/useNetwork';
@@ -44,29 +46,39 @@ interface Category {
 
 const { width } = Dimensions.get('window');
 const PROMO_WIDTH = width - 48;
+const APP_LOGO = require('../../assets/icon.png');
 
 const PROMO_ITEMS = [
   {
     title: 'Super Fast Delivery',
     subtitle: 'Fresh groceries in minutes',
     badge: 'Priority',
-    image: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&q=80&w=1000',
+    image: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&q=80&w=500',
     backgroundColor: '#7c3aed',
   },
   {
     title: 'Premium Savings',
     subtitle: 'Get up to 15% off on daily essentials',
     badge: 'Limited Offer',
-    image: 'https://images.unsplash.com/photo-1514996937319-344454492b37?auto=format&fit=crop&q=80&w=1000',
+    image: 'https://images.unsplash.com/photo-1514996937319-344454492b37?auto=format&fit=crop&q=80&w=500',
     backgroundColor: '#0f766e',
   },
   {
     title: 'New Arrivals',
     subtitle: 'Exclusive store deals just for you',
     badge: 'Just In',
-    image: 'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&q=80&w=1000',
+    image: 'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&q=80&w=500',
     backgroundColor: '#f59e0b',
   },
+];
+
+const SEARCH_PLACEHOLDERS = [
+  'Search "milk"',
+  'Search "rice"',
+  'Search "bread"',
+  'Search "vegetables"',
+  'Search "fruits"',
+  'Search "snacks"',
 ];
 
 interface ProductCardProps {
@@ -77,8 +89,10 @@ interface ProductCardProps {
   onIncrement: (productId: string) => void;
   onDecrement: (productId: string) => void;
   productLabel: string;
+  compact?: boolean;
 }
 
+// ─── Blinkit-style product card ───────────────────────────────────────────────
 const ProductCard = memo(function ProductCard({
   item,
   qty,
@@ -87,56 +101,65 @@ const ProductCard = memo(function ProductCard({
   onIncrement,
   onDecrement,
   productLabel,
+  compact = false,
 }: ProductCardProps) {
+  const hasDiscount = item.mrp != null && item.mrp > item.price;
+  const discountPct = hasDiscount
+    ? Math.round(((item.mrp! - item.price) / item.mrp!) * 100)
+    : (item.discount ?? 0);
+
   return (
     <TouchableOpacity
-      style={styles.card}
+      style={compact ? styles.blinkCard : styles.blinkCardWide}
       onPress={() => onPress(item._id)}
       activeOpacity={0.9}
     >
-      <View style={styles.cardImgContainer}>
-        {item.image ? (
-          <Image source={{ uri: item.image }} style={styles.cardImg} />
-        ) : (
-          <View style={[styles.cardImg, styles.cardImgPlaceholder]}>
-            <Ionicons name="leaf-outline" size={28} color="#a855f7" />
+      {/* Image area */}
+      <View style={compact ? styles.blinkImgBox : styles.blinkImgBoxWide}>
+        <PremiumImage
+          source={resolveMediaUrl(item.image) ? { uri: resolveMediaUrl(item.image)! } : null}
+          style={styles.blinkImg}
+          fallbackIcon="leaf-outline"
+          categoryName={item.category}
+        />
+        {discountPct > 0 && (
+          <View style={styles.blinkDiscBadge}>
+            <Text style={styles.blinkDiscText}>{discountPct}%{`\n`}OFF</Text>
           </View>
         )}
-        {(item.discount ?? 0) > 0 && (
-          <View style={styles.discountBadge}>
-            <Text style={styles.discountText}>{item.discount}% OFF</Text>
-          </View>
-        )}
-      </View>
-      <View style={styles.cardBody}>
-        <Text style={styles.cardUnit}>{item.unit || '1 pc'}</Text>
-        <Text style={styles.cardName} numberOfLines={2}>{productLabel}</Text>
-
-        <View style={styles.priceRow}>
-          <View>
-            <Text style={styles.cardPrice}>₹{item.price}</Text>
-            {item.mrp != null && item.mrp > item.price && (
-              <Text style={styles.cardMrp}>₹{item.mrp}</Text>
-            )}
-          </View>
+        {/* ADD / qty control anchored to bottom-right of image */}
+        <View style={styles.blinkAddAnchor}>
           {qty > 0 ? (
-            <View style={styles.qtyControl}>
-              <TouchableOpacity style={styles.qtyButton} onPress={() => onDecrement(item._id)} activeOpacity={0.7}>
-                <Text style={styles.qtyButtonText}>-</Text>
+            <View style={styles.blinkQtyRow}>
+              <TouchableOpacity style={styles.blinkQtyBtn} onPress={() => onDecrement(item._id)} activeOpacity={0.7}>
+                <Text style={styles.blinkQtyBtnText}>-</Text>
               </TouchableOpacity>
-              <Text style={styles.qtyValue}>{qty}</Text>
-              <TouchableOpacity style={styles.qtyButton} onPress={() => onIncrement(item._id)} activeOpacity={0.7}>
-                <Text style={styles.qtyButtonText}>+</Text>
+              <Text style={styles.blinkQtyVal}>{qty}</Text>
+              <TouchableOpacity style={styles.blinkQtyBtn} onPress={() => onIncrement(item._id)} activeOpacity={0.7}>
+                <Text style={styles.blinkQtyBtnText}>+</Text>
               </TouchableOpacity>
             </View>
           ) : (
-            <TouchableOpacity
-              style={styles.addBtn}
-              onPress={() => onAdd(item)}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.addBtnText}>ADD</Text>
+            <TouchableOpacity style={styles.blinkAddBtn} onPress={() => onAdd(item)} activeOpacity={0.8}>
+              <Text style={styles.blinkAddText}>ADD</Text>
             </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
+      {/* Info area */}
+      <View style={styles.blinkInfo}>
+        <Text style={styles.blinkUnit} numberOfLines={1}>{item.unit || '1 pc'}</Text>
+        <Text style={compact ? styles.blinkName : styles.blinkNameWide} numberOfLines={2}>{productLabel}</Text>
+        {hasDiscount && (
+          <Text style={styles.blinkSaving} numberOfLines={1}>
+            {discountPct}% OFF on MRP
+          </Text>
+        )}
+        <View style={styles.blinkPriceRow}>
+          <Text style={styles.blinkPrice}>₹{item.price}</Text>
+          {hasDiscount && (
+            <Text style={styles.blinkMrp}>₹{item.mrp}</Text>
           )}
         </View>
       </View>
@@ -154,7 +177,7 @@ export default function HomeScreen({ navigation }: Props) {
   const [langModalVisible, setLangModalVisible] = useState(false);
   const { language, setLanguage, translating, tProduct, tCategory } = useLanguage();
   const { onReconnect } = useNetwork();
-  const APP_LOGO = require('../../assets/icon.png');
+
 
   const load = useCallback(async () => {
     const startedAt = Date.now();
@@ -163,15 +186,38 @@ export default function HomeScreen({ navigation }: Props) {
       const [prodRes, catRes] = await Promise.all([getProducts(), getCategories()]);
       setProducts(prodRes.data);
       setCategories(catRes.data);
+
+      // Prefetch product images for instant loading
+      if (prodRes.data && Array.isArray(prodRes.data)) {
+        prodRes.data.slice(0, 15).forEach((p: Product) => {
+          const resolved = resolveMediaUrl(p.image);
+          if (resolved && (resolved.startsWith('http://') || resolved.startsWith('https://'))) {
+            Image.prefetch(resolved).catch(err => console.log('Product image prefetch failed:', resolved, err));
+          }
+        });
+      }
+
+      // Prefetch category images
+      if (catRes.data && Array.isArray(catRes.data)) {
+        catRes.data.forEach((c: Category) => {
+          const resolved = resolveMediaUrl(c.image);
+          if (resolved && (resolved.startsWith('http://') || resolved.startsWith('https://'))) {
+            Image.prefetch(resolved).catch(err => console.log('Category image prefetch failed:', resolved, err));
+          }
+        });
+      }
     } catch (e) {
       console.error(e);
     } finally {
       const elapsed = Date.now() - startedAt;
-      const remaining = Math.max(0, 900 - elapsed);
+      const remaining = Math.max(0, 600 - elapsed);
 
       if (remaining > 0) {
         await new Promise((resolve) => setTimeout(resolve, remaining));
       }
+
+      // Hide native splash BEFORE revealing content — no PremiumLoader flash
+      SplashScreen.hideAsync().catch(() => undefined);
 
       setLoading(false);
       setRefreshing(false);
@@ -238,6 +284,103 @@ export default function HomeScreen({ navigation }: Props) {
   const [activePromoIndex, setActivePromoIndex] = useState(0);
   const promoListRef = useRef<FlatList<typeof PROMO_ITEMS[number]> | null>(null);
 
+  // ═══════════════════════════════════════════
+  //  ADVANCED SEARCH BAR ANIMATIONS
+  // ═══════════════════════════════════════════
+  const searchScaleAnim    = useRef(new Animated.Value(1)).current;
+  const searchGlowAnim     = useRef(new Animated.Value(0)).current;
+  const searchGlowPulse    = useRef(new Animated.Value(1)).current;
+  const clearBtnAnim       = useRef(new Animated.Value(0)).current;
+  const placeholderSlide   = useRef(new Animated.Value(0)).current;   // 0=visible, -14=slide up
+  const placeholderOpacity = useRef(new Animated.Value(1)).current;
+  const iconBounceAnim     = useRef(new Animated.Value(0)).current;   // 0 = normal, 1 = bounced
+  const shimmerAnim        = useRef(new Animated.Value(-1)).current;  // sweeps -1 → 2
+
+  const [searchFocused, setSearchFocused]       = useState(false);
+  const [placeholderIndex, setPlaceholderIndex] = useState(0);
+
+  // — Shimmer sweep (idle, every 4 s) —
+  useEffect(() => {
+    const runShimmer = () => {
+      shimmerAnim.setValue(-1);
+      Animated.timing(shimmerAnim, {
+        toValue: 2,
+        duration: 1100,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }).start();
+    };
+    const t = setTimeout(runShimmer, 600);
+    const id = setInterval(runShimmer, 4200);
+    return () => { clearTimeout(t); clearInterval(id); };
+  }, [shimmerAnim]);
+
+  // — Placeholder slide-fade cycle —
+  useEffect(() => {
+    if (searchFocused || search.length > 0) return;
+    const id = setInterval(() => {
+      // slide up & fade out
+      Animated.parallel([
+        Animated.timing(placeholderSlide,   { toValue: -14, duration: 260, easing: Easing.in(Easing.ease), useNativeDriver: true }),
+        Animated.timing(placeholderOpacity, { toValue: 0,   duration: 240, useNativeDriver: true }),
+      ]).start(() => {
+        setPlaceholderIndex(p => (p + 1) % SEARCH_PLACEHOLDERS.length);
+        placeholderSlide.setValue(14);          // reset to slide-in from below
+        Animated.parallel([
+          Animated.timing(placeholderSlide,   { toValue: 0, duration: 260, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+          Animated.timing(placeholderOpacity, { toValue: 1, duration: 260, useNativeDriver: true }),
+        ]).start();
+      });
+    }, 2800);
+    return () => clearInterval(id);
+  }, [searchFocused, search, placeholderSlide, placeholderOpacity]);
+
+  // — Clear-button spring —
+  useEffect(() => {
+    const hasText = search.length > 0;
+    Animated.spring(clearBtnAnim, {
+      toValue: hasText ? 1 : 0,
+      useNativeDriver: true,
+      tension: 340,
+      friction: 9,
+    }).start();
+  }, [search, clearBtnAnim]);
+
+  // — Focus / blur —
+  const handleSearchFocus = useCallback(() => {
+    setSearchFocused(true);
+    Animated.parallel([
+      // spring scale up
+      Animated.spring(searchScaleAnim, { toValue: 1.022, useNativeDriver: true, tension: 260, friction: 9 }),
+      // glow fade in
+      Animated.timing(searchGlowAnim,  { toValue: 1, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+      // icon bounce: quick up-down
+      Animated.sequence([
+        Animated.timing(iconBounceAnim, { toValue: -6, duration: 120, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+        Animated.spring(iconBounceAnim, { toValue: 0,  useNativeDriver: true, tension: 400, friction: 7 }),
+      ]),
+    ]).start();
+    // start glow pulse loop
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(searchGlowPulse, { toValue: 1.06, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(searchGlowPulse, { toValue: 1.00, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ])
+    ).start();
+  }, [searchScaleAnim, searchGlowAnim, iconBounceAnim, searchGlowPulse]);
+
+  const handleSearchBlur = useCallback(() => {
+    setSearchFocused(false);
+    searchGlowPulse.stopAnimation();
+    Animated.parallel([
+      Animated.spring(searchScaleAnim, { toValue: 1,  useNativeDriver: true, tension: 260, friction: 9 }),
+      Animated.timing(searchGlowAnim,  { toValue: 0,  duration: 220, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+      Animated.spring(searchGlowPulse, { toValue: 1,  useNativeDriver: true, tension: 200, friction: 8 }),
+    ]).start();
+  }, [searchScaleAnim, searchGlowAnim, searchGlowPulse]);
+
+
+  // \u2014 Promo banner auto-scroll \u2014
   useEffect(() => {
     const interval = setInterval(() => {
       setActivePromoIndex((currentIndex) => {
@@ -246,13 +389,12 @@ export default function HomeScreen({ navigation }: Props) {
         return nextIndex;
       });
     }, 4500);
-
     return () => clearInterval(interval);
   }, []);
 
   const renderPromoItem = useCallback(({ item }: { item: typeof PROMO_ITEMS[number] }) => (
     <View style={[styles.promoCard, { width: PROMO_WIDTH, backgroundColor: item.backgroundColor }]}> 
-      <Image source={{ uri: item.image }} style={styles.promoImg} />
+      <PremiumImage source={{ uri: item.image }} style={styles.promoImg} />
       <View style={styles.promoOverlay} />
       <View style={styles.promoContent}>
         <View style={styles.promoBadge}>
@@ -264,45 +406,61 @@ export default function HomeScreen({ navigation }: Props) {
     </View>
   ), []);
 
-  const renderProduct = useCallback(({ item }: { item: Product }) => (
+
+
+  // ─── Render each product as a compact blink card inside the 2-col grid ──────
+  const renderGridProduct = useCallback((product: Product) => (
     <ProductCard
-      item={item}
-      qty={qtyMap[item._id] ?? 0}
+      key={product._id}
+      item={product}
+      qty={qtyMap[product._id] ?? 0}
       onPress={handleProductPress}
       onAdd={handleAdd}
       onIncrement={increaseQty}
       onDecrement={decreaseQty}
-      productLabel={tProduct(item.name)}
+      productLabel={tProduct(product.name)}
+      compact
     />
   ), [qtyMap, handleAdd, handleProductPress, tProduct, increaseQty, decreaseQty]);
 
-  const renderCategoryGroup = useCallback(({ item: group }: { item: { category: Category; products: Product[] } }) => (
-    <View key={group.category._id} style={styles.horizontalSection}>
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>{group.category.name === 'Search Results' ? group.category.name : tCategory(group.category.name)}</Text>
-        {group.category.name !== 'Search Results' && (
-          <TouchableOpacity onPress={() => navigation.navigate('CategoryProducts', { categoryName: group.category.name })}>
-            <Text style={styles.seeAllText}>See all</Text>
-          </TouchableOpacity>
-        )}
+  const renderCategoryGroup = useCallback(({ item: group }: { item: { category: Category; products: Product[] } }) => {
+    // Split products into rows of 2 for the 2-col grid
+    const rows: Product[][] = [];
+    for (let i = 0; i < group.products.length; i += 2) {
+      rows.push(group.products.slice(i, i + 2));
+    }
+    return (
+      <View key={group.category._id} style={styles.catSection}>
+        {/* Section header */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>
+            {group.category.name === 'Search Results' ? group.category.name : tCategory(group.category.name)}
+          </Text>
+          {group.category.name !== 'Search Results' && (
+            <TouchableOpacity onPress={() => navigation.navigate('CategoryProducts', { categoryName: group.category.name })}>
+              <Text style={styles.seeAllText}>See all ›</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* Horizontal product scroll showing Blinkit-style cards */}
+        <FlatList
+          horizontal
+          data={group.products}
+          renderItem={({ item }) => renderGridProduct(item)}
+          keyExtractor={(item) => item._id}
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.blinkHScroll}
+          initialNumToRender={6}
+          maxToRenderPerBatch={6}
+          windowSize={9}
+          removeClippedSubviews
+          nestedScrollEnabled
+          extraData={qtyMap}
+        />
       </View>
-      <FlatList
-        horizontal
-        data={group.products}
-        renderItem={renderProduct}
-        keyExtractor={(item) => item._id}
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.horizontalScroll}
-        initialNumToRender={4}
-        maxToRenderPerBatch={4}
-        windowSize={5}
-        removeClippedSubviews
-        nestedScrollEnabled
-        getItemLayout={(_data, index) => ({ length: 148, offset: 148 * index, index })}
-        extraData={qtyMap}
-      />
-    </View>
-  ), [renderProduct, tCategory, navigation, qtyMap]);
+    );
+  }, [renderGridProduct, tCategory, navigation, qtyMap]);
 
   const listHeaderComponent = useMemo(() => (
     <View>
@@ -345,11 +503,12 @@ export default function HomeScreen({ navigation }: Props) {
               onPress={() => navigation.navigate('CategoryProducts', { categoryName: cat.name })}
             >
               <View style={styles.catGridImgContainer}>
-                {cat.image ? (
-                  <Image source={{ uri: cat.image }} style={styles.catGridImg} />
-                ) : (
-                  <Text style={styles.catGridIcon}>{cat.icon}</Text>
-                )}
+                <PremiumImage
+                  source={resolveMediaUrl(cat.image) ? { uri: resolveMediaUrl(cat.image)! } : null}
+                  style={styles.catGridImg}
+                  categoryName={cat.name}
+                  fallbackEmoji={cat.icon}
+                />
               </View>
               <Text style={styles.catGridText} numberOfLines={2}>{tCategory(cat.name)}</Text>
             </TouchableOpacity>
@@ -369,12 +528,12 @@ export default function HomeScreen({ navigation }: Props) {
     </View>
   ), []);
 
+  // During initial load, render the animated premium loader
   if (loading) {
     return (
       <PremiumLoader
-        message="Loading fresh picks"
-        subMessage="Fetching the best deals for you"
-        size="large"
+        message="Loading FirstMart"
+        subMessage="Fresh products in minutes"
         fullScreen
       />
     );
@@ -387,7 +546,7 @@ export default function HomeScreen({ navigation }: Props) {
         <View style={styles.headerTop}>
           <View style={styles.headerLeft}>
             <View style={styles.headerBrand}>
-                  <Image source={APP_LOGO} style={styles.headerLogo} />
+                  <PremiumImage source={APP_LOGO} style={styles.headerLogo} />
               <View>
                 <Text style={styles.deliveryTitle}>Firstmartt</Text>
                 <Text style={styles.deliverySubtitle}>Delivery in 10 minutes</Text>
@@ -404,18 +563,91 @@ export default function HomeScreen({ navigation }: Props) {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.searchRow}>
+        {/* ═══ ADVANCED ANIMATED SEARCH BAR ═══ */}
+        <Animated.View style={[styles.searchRowOuter, { transform: [{ scale: searchScaleAnim }] }]}>
+
+          {/* Pulsing glow border — scales + fades on focus */}
+          <Animated.View
+            style={[
+              styles.searchGlowBorder,
+              {
+                opacity: searchGlowAnim,
+                transform: [{ scale: searchGlowPulse }],
+              },
+            ]}
+            pointerEvents="none"
+          />
+
           <View style={styles.searchBox}>
-            <Ionicons name="search-outline" size={20} color="#4b5563" style={{ marginRight: 8 }} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder='Search "milk"'
-              placeholderTextColor="#94a3b8"
-              value={search}
-              onChangeText={setSearch}
-            />
+
+            {/* Bouncing search icon */}
+            <Animated.View style={{ transform: [{ translateY: iconBounceAnim }], marginRight: 8 }}>
+              <Ionicons
+                name={searchFocused ? 'search' : 'search-outline'}
+                size={20}
+                color={searchFocused ? '#7c3aed' : '#94a3b8'}
+              />
+            </Animated.View>
+
+            {/* Input + slide-fade cycling placeholder */}
+            <View style={{ flex: 1, justifyContent: 'center', overflow: 'hidden' }}>
+              <TextInput
+                style={styles.searchInput}
+                placeholder=""
+                placeholderTextColor="#94a3b8"
+                value={search}
+                onChangeText={setSearch}
+                onFocus={handleSearchFocus}
+                onBlur={handleSearchBlur}
+              />
+              {!search && !searchFocused && (
+                <View pointerEvents="none" style={styles.searchPlaceholderWrap}>
+                  <Animated.Text
+                    style={[
+                      styles.searchPlaceholder,
+                      {
+                        opacity: placeholderOpacity,
+                        transform: [{ translateY: placeholderSlide }],
+                      },
+                    ]}
+                  >
+                    {SEARCH_PLACEHOLDERS[placeholderIndex]}
+                  </Animated.Text>
+                </View>
+              )}
+            </View>
+
+            {/* Shimmer sweep — slides across the bar when idle */}
+            {!searchFocused && !search && (
+              <Animated.View
+                pointerEvents="none"
+                style={[
+                  styles.shimmerBar,
+                  {
+                    transform: [{
+                      translateX: shimmerAnim.interpolate({
+                        inputRange: [-1, 2],
+                        outputRange: [-200, 400],
+                      }),
+                    }],
+                  },
+                ]}
+              />
+            )}
+
+            {/* Animated clear ✕ button (shows when text entered) */}
+            {search.length > 0 && (
+              <Animated.View style={{ opacity: clearBtnAnim, transform: [{ scale: clearBtnAnim }], marginLeft: 4 }}>
+                <TouchableOpacity
+                  onPress={() => setSearch('')}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name="close-circle" size={20} color="#7c3aed" />
+                </TouchableOpacity>
+              </Animated.View>
+            )}
           </View>
-        </View>
+        </Animated.View>
       </View>
 
       <FlatList
@@ -430,9 +662,9 @@ export default function HomeScreen({ navigation }: Props) {
         onRefresh={() => { setRefreshing(true); load(); }}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
-        initialNumToRender={3}
-        maxToRenderPerBatch={3}
-        windowSize={5}
+        initialNumToRender={5}
+        maxToRenderPerBatch={5}
+        windowSize={9}
         removeClippedSubviews
         updateCellsBatchingPeriod={30}
         scrollEventThrottle={16}
@@ -572,9 +804,60 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   profileBtn: {},
-  searchRow: { backgroundColor: '#ffffff', borderRadius: 12, overflow: 'hidden' },
-  searchBox: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, height: 44 },
-  searchInput: { flex: 1, fontSize: 15, color: '#0f172a' },
+  searchRowOuter: {
+    borderRadius: 14,
+    position: 'relative',
+  },
+  searchGlowBorder: {
+    position: 'absolute',
+    top: -3,
+    left: -3,
+    right: -3,
+    bottom: -3,
+    borderRadius: 17,
+    borderWidth: 2.5,
+    borderColor: '#a855f7',
+    backgroundColor: 'transparent',
+    // soft shadow so the glow bleeds outward
+    shadowColor: '#a855f7',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 8,
+    elevation: 0,
+  },
+  searchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    height: 48,
+    backgroundColor: '#ffffff',
+    borderRadius: 14,
+    overflow: 'hidden',           // clips shimmer bar
+  },
+  searchInput: { flex: 1, fontSize: 15, color: '#0f172a', paddingVertical: 0 },
+  searchPlaceholderWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+  },
+  searchPlaceholder: {
+    fontSize: 15,
+    color: '#94a3b8',
+  },
+  shimmerBar: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: 80,
+    backgroundColor: 'rgba(255,255,255,0.55)',
+    // angled via skewX — note: skewX needs transform array on the parent
+    opacity: 0.7,
+    borderRadius: 4,
+    transform: [{ skewX: '-20deg' }],
+  },
   promoWrapper: { marginTop: 16, marginBottom: 14 },
   promoScrollContent: { paddingHorizontal: 16 },
   promoCard: {
@@ -631,22 +914,199 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     width: 18,
   },
+  // ─── Category grid (top strip) ──────────────────────────────────────────────
   categoryGridContainer: {
-    flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 8, marginBottom: 16
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 10,
+    marginBottom: 8,
   },
-  catGridItem: { width: width / 4 - 4, alignItems: 'center', paddingVertical: 8, paddingHorizontal: 4 },
+  catGridItem: {
+    width: (width - 20) / 4,
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 3,
+  },
   catGridImgContainer: {
-    width: 60, height: 60, borderRadius: 30, backgroundColor: '#f1f5f9',
-    alignItems: 'center', justifyContent: 'center', overflow: 'hidden', marginBottom: 6,
-    borderWidth: 1, borderColor: '#e2e8f0'
+    width: (width - 20) / 4 - 6,
+    height: (width - 20) / 4 - 6,
+    borderRadius: 14,
+    backgroundColor: '#ede9fe',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    marginBottom: 6,
+    // No padding — images fill the full square for uniform ratio
   },
   catGridImg: { width: '100%', height: '100%', resizeMode: 'cover' },
-  catGridIcon: { fontSize: 28 },
-  catGridText: { fontSize: 11, color: '#475569', fontWeight: '500', textAlign: 'center', lineHeight: 14 },
+  catGridIcon: { fontSize: 36 },
+  catGridText: {
+    fontSize: 11,
+    color: '#3b0764',
+    fontWeight: '600',
+    textAlign: 'center',
+    lineHeight: 15,
+    paddingHorizontal: 2,
+  },
+
+  // ─── Category section (Blinkit-style) ────────────────────────────────────────
+  catSection: {
+    marginBottom: 0,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ede9fe',
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 10,
+    backgroundColor: '#faf5ff',
+  },
+  sectionTitle: { fontSize: 16, fontWeight: '800', color: '#2d1b69' },
+  seeAllText: { fontSize: 13, fontWeight: '700', color: '#7c3aed' },
+  blinkHScroll: { paddingHorizontal: 12, paddingBottom: 12 },
+
+  // ─── Blinkit-style product card (compact — for horizontal list) ───────────────
+  blinkCard: {
+    width: 148,
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    marginRight: 10,
+    borderWidth: 1,
+    borderColor: '#ede9fe',
+    overflow: 'hidden',
+    shadowColor: '#7c3aed',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.07,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  blinkCardWide: {
+    width: 160,
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    marginRight: 10,
+    borderWidth: 1,
+    borderColor: '#ede9fe',
+    overflow: 'hidden',
+    shadowColor: '#7c3aed',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.07,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  blinkImgBox: {
+    width: '100%',
+    height: 130,
+    backgroundColor: '#faf5ff',
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  blinkImgBoxWide: {
+    width: '100%',
+    height: 150,
+    backgroundColor: '#faf5ff',
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  blinkImg: { width: '85%', height: '85%', resizeMode: 'contain' },
+  blinkImgPlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  blinkDiscBadge: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    backgroundColor: '#7c3aed',
+    borderRadius: 6,
+    paddingHorizontal: 5,
+    paddingVertical: 3,
+    alignItems: 'center',
+    minWidth: 34,
+  },
+  blinkDiscText: {
+    color: '#ffffff',
+    fontSize: 9,
+    fontWeight: '800',
+    textAlign: 'center',
+    lineHeight: 12,
+  },
+  blinkAddAnchor: {
+    position: 'absolute',
+    bottom: 8,
+    right: 8,
+    zIndex: 20,
+    elevation: 20,
+  },
+  blinkAddBtn: {
+    backgroundColor: '#ffffff',
+    borderWidth: 1.5,
+    borderColor: '#7c3aed',
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 5,
+    alignItems: 'center',
+    minWidth: 60,
+    shadowColor: '#7c3aed',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  blinkAddText: { color: '#7c3aed', fontSize: 12, fontWeight: '800', letterSpacing: 0.5 },
+  blinkQtyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#7c3aed',
+    borderRadius: 8,
+    overflow: 'hidden',
+    minWidth: 80,
+    height: 30,
+  },
+  blinkQtyBtn: {
+    width: 28,
+    height: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  blinkQtyBtnText: { color: '#ffffff', fontSize: 16, fontWeight: '700' },
+  blinkQtyVal: { flex: 1, textAlign: 'center', fontSize: 13, fontWeight: '800', color: '#ffffff' },
+  blinkInfo: { paddingHorizontal: 10, paddingVertical: 10 },
+  blinkUnit: { fontSize: 11, color: '#64748b', marginBottom: 2 },
+  blinkName: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#1e1b4b',
+    lineHeight: 17,
+    marginBottom: 4,
+    minHeight: 34,
+  },
+  blinkNameWide: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#1e1b4b',
+    lineHeight: 18,
+    marginBottom: 4,
+    minHeight: 36,
+  },
+  blinkSaving: {
+    fontSize: 10,
+    color: '#16a34a',
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  blinkPriceRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  blinkPrice: { fontSize: 15, fontWeight: '800', color: '#1e1b4b' },
+  blinkMrp: {
+    fontSize: 11,
+    color: '#94a3b8',
+    textDecorationLine: 'line-through',
+  },
+
+  // ─── Legacy card styles kept for safety ──────────────────────────────────────
   horizontalSection: { marginBottom: 24 },
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, marginBottom: 12 },
-  sectionTitle: { fontSize: 18, fontWeight: '800', color: '#0f172a' },
-  seeAllText: { fontSize: 14, fontWeight: '600', color: '#7c3aed' },
   horizontalScroll: { paddingHorizontal: 12, paddingBottom: 4 },
   card: {
     width: 140, backgroundColor: '#ffffff', borderRadius: 12, marginHorizontal: 4,

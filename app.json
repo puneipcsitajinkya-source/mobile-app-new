@@ -17,7 +17,14 @@
       ],
       "expo-font",
       "expo-status-bar",
-      "expo-splash-screen"
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/transparent.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#f8fafc"
+        }
+      ]
     ],
     "ios": {
       "supportsTablet": true,
@@ -40,17 +47,17 @@
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
-      }
+      },
+      "versionCode": 2
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
+    "owner": "ajay8970",
     "extra": {
       "eas": {
-        "projectId": "1bf9f50b-9531-4ef0-b7fa-afeefcca11ec"
-      },
-      "apiUrl": "http://13.201.103.106:3001"
-    },
-    "owner": "ajinkya8970"
+        "projectId": "dfedd3c6-90ff-4063-b333-d18363e228d5"
+      }
+    }
   }
 }

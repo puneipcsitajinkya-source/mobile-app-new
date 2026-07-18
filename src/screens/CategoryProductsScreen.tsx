@@ -1,9 +1,11 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity, ScrollView,
-  Image, StyleSheet, RefreshControl
+  View, Text, FlatList, TouchableOpacity,
+  StyleSheet, RefreshControl, Dimensions, Image
 } from 'react-native';
+import PremiumImage from '../components/PremiumImage';
 import StickyCart from '../components/StickyCart';
+import PremiumLoader from '../components/PremiumLoader';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../navigation/AppNavigator';
@@ -43,50 +45,75 @@ interface ProductCardProps {
   qty: number;
   onPress: (productId: string) => void;
   onAdd: (product: Product) => void;
+  onIncrease: (productId: string) => void;
+  onDecrease: (productId: string) => void;
   tProduct: (name: Product['name']) => string;
+  cardWidth: number;
 }
 
-const ProductCard = React.memo(function ProductCard({ item, qty, onPress, onAdd, tProduct }: ProductCardProps) {
+const { width } = Dimensions.get('window');
+const SIDEBAR_WIDTH = 96;
+const FULL_CARD_WIDTH  = (width - 28) / 2;          // no sidebar: 2 cols, 6px gap on each side
+const SIDE_CARD_WIDTH  = ((width - SIDEBAR_WIDTH) - 20) / 2; // with sidebar: 2 cols, smaller column
+
+const ProductCard = React.memo(function ProductCard({
+  item, qty, onPress, onAdd, onIncrease, onDecrease, tProduct, cardWidth,
+}: ProductCardProps) {
+  const hasDiscount = (item.discount ?? 0) > 0;
+  const hasMrp = item.mrp != null && item.mrp > item.price;
+
   return (
-    <TouchableOpacity
-      style={styles.card}
-      onPress={() => onPress(item._id)}
-      activeOpacity={0.9}
-    >
+    <TouchableOpacity style={[styles.card, { width: cardWidth }]} onPress={() => onPress(item._id)} activeOpacity={0.93}>
+
+      {/* ── Image section (faint purple bg) ── */}
       <View style={styles.cardImgContainer}>
-        {item.image ? (
-          <Image source={{ uri: item.image }} style={styles.cardImg} resizeMode="cover" />
-        ) : (
-          <View style={[styles.cardImg, styles.cardImgPlaceholder]}>
-            <Ionicons name="leaf-outline" size={28} color="#a855f7" />
-          </View>
-        )}
-        {(item.discount ?? 0) > 0 && (
+        <PremiumImage
+          source={resolveMediaUrl(item.image) ? { uri: resolveMediaUrl(item.image)! } : null}
+          style={styles.cardImg}
+          resizeMode="contain"
+          fallbackIcon="leaf-outline"
+          categoryName={item.category}
+        />
+
+        {/* Discount badge — top left */}
+        {hasDiscount && (
           <View style={styles.discountBadge}>
             <Text style={styles.discountText}>{item.discount}% OFF</Text>
           </View>
         )}
-      </View>
-      <View style={styles.cardBody}>
-        <Text style={styles.cardUnit}>{item.unit || '1 pc'}</Text>
-        <Text style={styles.cardName} numberOfLines={2}>{tProduct(item.name)}</Text>
-        <View style={styles.priceRow}>
-          <View>
-            <Text style={styles.cardPrice}>₹{item.price}</Text>
-            {item.mrp != null && item.mrp > item.price && (
-              <Text style={styles.cardMrp}>₹{item.mrp}</Text>
-            )}
-          </View>
-          <TouchableOpacity
-            style={[styles.addBtn, qty > 0 && styles.addedBtn]}
-            onPress={() => onAdd(item)}
-            activeOpacity={0.7}
-          >
-            <Text style={[styles.addBtnText, qty > 0 && styles.addedBtnText]}>
-              {qty > 0 ? qty : 'ADD'}
-            </Text>
-          </TouchableOpacity>
+
+        {/* Bottom bar: unit + ADD / qty control */}
+        <View style={styles.cardImgBar}>
+          <Text style={styles.cardUnitOverlay} numberOfLines={1}>{item.unit || '1 pc'}</Text>
+
+          {qty > 0 ? (
+            <View style={styles.qtyControl}>
+              <TouchableOpacity style={styles.qtyBtn} onPress={() => onDecrease(item._id)} activeOpacity={0.7}>
+                <Text style={styles.qtyBtnText}>−</Text>
+              </TouchableOpacity>
+              <Text style={styles.qtyValue}>{qty}</Text>
+              <TouchableOpacity style={styles.qtyBtn} onPress={() => onIncrease(item._id)} activeOpacity={0.7}>
+                <Text style={styles.qtyBtnText}>+</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity style={styles.addBtn} onPress={() => onAdd(item)} activeOpacity={0.8}>
+              <Text style={styles.addBtnText}>ADD</Text>
+            </TouchableOpacity>
+          )}
         </View>
+      </View>
+
+      {/* ── Content below image ── */}
+      <View style={styles.cardContent}>
+        <View style={styles.priceRow}>
+          <Text style={styles.cardPrice}>₹{item.price}</Text>
+          {hasMrp && <Text style={styles.cardMrp}>₹{item.mrp}</Text>}
+        </View>
+        {hasDiscount && (
+          <Text style={styles.discountLabel}>{item.discount}% OFF on MRP</Text>
+        )}
+        <Text style={styles.cardName} numberOfLines={3}>{tProduct(item.name)}</Text>
       </View>
     </TouchableOpacity>
   );
@@ -99,7 +126,7 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
   const [refreshing, setRefreshing] = useState(false);
   const [subcategories, setSubcategories] = useState<Subcategory[]>([]);
   const [selectedSubcategory, setSelectedSubcategory] = useState<string>('');
-  const { addToCart, items: cart, totalItems, totalAmount: cartTotal } = useCart();
+  const { addToCart, items: cart, totalItems, totalAmount: cartTotal, increaseQty, decreaseQty } = useCart();
   const { tProduct } = useLanguage();
 
   const load = useCallback(async () => {
@@ -113,14 +140,36 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
       ]);
 
       if (productResult.status === 'fulfilled') {
-        setProducts(productResult.value.data || []);
+        const prodData = productResult.value.data || [];
+        setProducts(prodData);
+        
+        // Prefetch products images for instant rendering on scroll
+        if (Array.isArray(prodData)) {
+          prodData.slice(0, 15).forEach((p: Product) => {
+            const resolved = resolveMediaUrl(p.image);
+            if (resolved && (resolved.startsWith('http://') || resolved.startsWith('https://'))) {
+              Image.prefetch(resolved).catch(err => console.log('Category product image prefetch failed:', resolved, err));
+            }
+          });
+        }
       } else {
         console.error('Failed to load products for category:', categoryName, productResult.reason);
         setProducts([]);
       }
 
       if (subcategoryResult.status === 'fulfilled') {
-        setSubcategories(subcategoryResult.value.data || []);
+        const subcatData = subcategoryResult.value.data || [];
+        setSubcategories(subcatData);
+        
+        // Prefetch subcategory images
+        if (Array.isArray(subcatData)) {
+          subcatData.forEach((s: Subcategory) => {
+            const resolved = resolveMediaUrl(s.image);
+            if (resolved && (resolved.startsWith('http://') || resolved.startsWith('https://'))) {
+              Image.prefetch(resolved).catch(err => console.log('Subcategory image prefetch failed:', resolved, err));
+            }
+          });
+        }
       } else {
         console.error('Failed to load subcategories for category:', categoryName, subcategoryResult.reason);
         setSubcategories([]);
@@ -165,23 +214,29 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
 
   const renderProduct = useCallback(({ item }: { item: Product }) => {
     const qty = getProductQty(item._id);
+    const cardWidth = subcategories.length > 0 ? SIDE_CARD_WIDTH : FULL_CARD_WIDTH;
     return (
       <ProductCard
         item={item}
         qty={qty}
         onPress={handleProductPress}
         onAdd={handleAdd}
+        onIncrease={increaseQty}
+        onDecrease={decreaseQty}
         tProduct={tProduct}
+        cardWidth={cardWidth}
       />
     );
-  }, [getProductQty, handleAdd, handleProductPress, tProduct]);
+  }, [getProductQty, handleAdd, handleProductPress, increaseQty, decreaseQty, tProduct, subcategories.length]);
 
   if (loading) {
     return (
-      <View style={styles.loaderContainer}>
-        <Ionicons name="leaf-outline" size={40} color="#a855f7" />
-        <Text style={styles.loaderText}>Loading products...</Text>
-      </View>
+      <PremiumLoader
+        message="Loading products"
+        subMessage={`Fetching items in ${categoryName}`}
+        size="large"
+        fullScreen
+      />
     );
   }
 
@@ -204,18 +259,26 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
               contentContainerStyle={styles.subcategoryList}
               renderItem={({ item }) => {
                 const isSelected = (item._id !== 'all' && item._id === selectedSubcategory) || (item._id === 'all' && !selectedSubcategory);
+                const isAllTab = item._id === 'all';
                 return (
                   <TouchableOpacity
-                    style={[styles.subcategoryCard, isSelected && styles.subcategoryCardActive, styles.subcategoryCardShadow]}
-                    onPress={() => setSelectedSubcategory(item._id === 'all' ? '' : item._id)}
+                    style={[
+                      styles.subcategoryCard,
+                      isSelected && styles.subcategoryCardActive,
+                      styles.subcategoryCardShadow,
+                      isAllTab && { justifyContent: 'center' }
+                    ]}
+                    onPress={() => setSelectedSubcategory(isAllTab ? '' : item._id)}
                     activeOpacity={0.8}
                   >
-                    {resolveMediaUrl(item.image) ? (
-                      <Image source={{ uri: resolveMediaUrl(item.image)! }} style={styles.subcategoryCardImage} resizeMode="cover" />
-                    ) : (
-                      <View style={[styles.subcategoryCardIcon, isSelected && styles.subcategoryCardIconActive]}>
-                        <Text style={[styles.subcategoryCardIconText, isSelected && styles.subcategoryCardIconTextActive]}>{item.icon || '🏷️'}</Text>
-                      </View>
+                    {!isAllTab && (
+                      <PremiumImage
+                        source={resolveMediaUrl(item.image) ? { uri: resolveMediaUrl(item.image)! } : null}
+                        style={styles.subcategoryCardImage}
+                        resizeMode="cover"
+                        categoryName={item.name}
+                        fallbackEmoji={item.icon || '🏷️'}
+                      />
                     )}
                     <Text style={[styles.subcategoryCardLabel, isSelected && styles.subcategoryCardLabelActive]} numberOfLines={2}>
                       {item.name}
@@ -238,10 +301,10 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
               contentContainerStyle={styles.grid}
               showsVerticalScrollIndicator={false}
               initialNumToRender={12}
-              maxToRenderPerBatch={8}
-              windowSize={7}
+              maxToRenderPerBatch={12}
+              windowSize={11}
               removeClippedSubviews
-              updateCellsBatchingPeriod={50}
+              updateCellsBatchingPeriod={30}
               refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor="#a855f7" />}
               ListEmptyComponent={
                 <View style={styles.emptyState}>
@@ -266,10 +329,10 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
           contentContainerStyle={styles.grid}
           showsVerticalScrollIndicator={false}
           initialNumToRender={12}
-          maxToRenderPerBatch={8}
-          windowSize={7}
+          maxToRenderPerBatch={12}
+          windowSize={11}
           removeClippedSubviews
-          updateCellsBatchingPeriod={50}
+          updateCellsBatchingPeriod={30}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor="#a855f7" />}
           ListEmptyComponent={
             <View style={styles.emptyState}>
@@ -295,8 +358,7 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8fafc' },
-  loaderContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f8fafc' },
-  loaderText: { marginTop: 12, color: '#64748b', fontWeight: '600' },
+
   contentArea: { flex: 1 },
   mainContent: { flex: 1, flexDirection: 'row', backgroundColor: '#f8fafc' },
   subcategoryColumn: { width: 96, backgroundColor: '#ffffff', paddingTop: 12, paddingBottom: 12, borderRightWidth: 1, borderRightColor: '#e2e8f0', alignItems: 'center' },
@@ -304,7 +366,7 @@ const styles = StyleSheet.create({
   subcategorySectionHeader: { paddingHorizontal: 12, marginBottom: 12 },
   subcategorySectionTitle: { fontSize: 15, fontWeight: '800', color: '#0f172a' },
   subcategorySectionCount: { fontSize: 11, color: '#64748b', marginTop: 4 },
-  subcategoryList: { paddingHorizontal: 6, paddingBottom: 12 },
+  subcategoryList: { paddingHorizontal: 6, paddingBottom: 100 },
   subcategorySeparator: { height: 10 },
   subcategoryCard: {
     width: 72,
@@ -351,27 +413,132 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   productList: { flex: 1 },
-  grid: { padding: 10, paddingBottom: 75 },
+  grid: { padding: 6, paddingBottom: 90 },
+
+  // ── Product card ──
   card: {
-    flex: 1, maxWidth: '47%', margin: 6, backgroundColor: '#ffffff', borderRadius: 12,
-    borderWidth: 1, borderColor: '#e2e8f0', overflow: 'hidden',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2,
+    margin: 5,
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    overflow: 'hidden',
+    shadowColor: '#7c3aed',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.07,
+    shadowRadius: 10,
+    elevation: 3,
   },
-  cardImgContainer: { width: '100%', height: 140, backgroundColor: '#f8fafc', position: 'relative' },
-  cardImg: { width: '100%', height: '100%', resizeMode: 'contain' },
-  cardImgPlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  discountBadge: { position: 'absolute', top: 0, left: 0, backgroundColor: '#3b82f6', paddingHorizontal: 6, paddingVertical: 2, borderBottomRightRadius: 8 },
-  discountText: { color: '#ffffff', fontSize: 10, fontWeight: '800' },
-  cardBody: { padding: 12 },
-  cardUnit: { fontSize: 11, color: '#64748b', marginBottom: 4 },
-  cardName: { fontSize: 13, fontWeight: '600', color: '#0f172a', marginBottom: 8, height: 36, lineHeight: 18 },
-  priceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
-  cardPrice: { fontSize: 15, fontWeight: '800', color: '#0f172a',marginRight: 6 },
-  cardMrp: { fontSize: 12, color: '#94a3b8', textDecorationLine: 'line-through', marginTop: 2 },
-  addBtn: { backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#a855f7', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 4, minWidth: 50, alignItems: 'center' },
-  addedBtn: { backgroundColor: '#a855f7' },
-  addBtnText: { color: '#a855f7', fontSize: 12, fontWeight: '800' },
-  addedBtnText: { color: '#ffffff' },
+  cardImgContainer: {
+    width: '100%',
+    height: 160,
+    backgroundColor: '#f0ebff',   // faint purple theme
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 8,
+  },
+  cardImg: {
+    width: '82%',
+    height: '78%',
+    resizeMode: 'contain',
+  },
+  cardImgPlaceholder: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  discountBadge: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    backgroundColor: '#7c3aed',
+    borderRadius: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  discountText: { color: '#fff', fontSize: 9, fontWeight: '800' },
+
+  // Bottom bar overlaid on image
+  cardImgBar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+    backgroundColor: 'rgba(240,235,255,0.92)',
+    zIndex: 20,
+    elevation: 20,
+  },
+  cardUnitOverlay: {
+    fontSize: 11,
+    color: '#4c1d95',
+    fontWeight: '600',
+    flex: 1,
+    marginRight: 6,
+  },
+  // ADD button
+  addBtn: {
+    backgroundColor: '#ffffff',
+    borderWidth: 1.5,
+    borderColor: '#7c3aed',
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 5,
+    minWidth: 60,
+    alignItems: 'center',
+  },
+  addBtnText: { color: '#7c3aed', fontSize: 13, fontWeight: '800' },
+  // Qty stepper (replaces ADD when item in cart)
+  qtyControl: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#7c3aed',
+    borderRadius: 8,
+    overflow: 'hidden',
+    minWidth: 80,
+    height: 32,
+  },
+  qtyBtn: {
+    width: 28,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  qtyBtnText: { color: '#ffffff', fontSize: 18, fontWeight: '700', lineHeight: 22 },
+  qtyValue: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#ffffff',
+  },
+
+  // Content below image
+  cardContent: { padding: 10 },
+  priceRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 6,
+    marginBottom: 2,
+  },
+  cardPrice: { fontSize: 16, fontWeight: '800', color: '#0f172a' },
+  cardMrp: { fontSize: 12, color: '#94a3b8', textDecorationLine: 'line-through' },
+  discountLabel: {
+    fontSize: 11,
+    color: '#7c3aed',
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  cardName: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#374151',
+    lineHeight: 17,
+  },
+
   emptyState: {
     alignItems: 'center', justifyContent: 'center',
     paddingVertical: 36, paddingHorizontal: 24, paddingBottom: 36,

@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity, Image, StyleSheet,
+  View, Text, FlatList, TouchableOpacity, StyleSheet,
   ScrollView
 } from 'react-native';
+import PremiumImage from '../components/PremiumImage';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useCart } from '../hooks/useCart';
@@ -94,13 +95,12 @@ export default function CartScreen({ navigation }: Props) {
           <View style={styles.section}>
             {items.map((item) => (
               <View key={item._id} style={styles.row}>
-                {resolveMediaUrl(item.image) ? (
-                  <Image source={{ uri: resolveMediaUrl(item.image)! }} style={styles.img} resizeMode="cover" />
-                ) : (
-                  <View style={[styles.img, styles.imgPlaceholder]}>
-                    <Ionicons name="image-outline" size={20} color="#cbd5e1" />
-                  </View>
-                )}
+                <PremiumImage
+                  source={resolveMediaUrl(item.image) ? { uri: resolveMediaUrl(item.image)! } : null}
+                  style={styles.img}
+                  resizeMode="cover"
+                  fallbackIcon="image-outline"
+                />
                 <View style={styles.info}>
                   <Text style={styles.itemName} numberOfLines={2}>{tProduct(item.name)}</Text>
                   <Text style={styles.itemPrice}>₹{item.price}</Text>

@@ -242,40 +242,43 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
         setDynamicTranslations(cacheObj);
 
         if (savedLang && (savedLang === 'en' || savedLang === 'mr' || savedLang === 'hi')) {
+          // Saved preference — apply immediately, no network needed
           setLanguageState(savedLang as Language);
         } else {
-          // No local preference, fetch default language from backend settings
-          try {
-            const settingsRes = await getSettings();
-            const backendDefaultLang = settingsRes.data?.defaultLanguage;
-            if (backendDefaultLang && (backendDefaultLang === 'en' || backendDefaultLang === 'mr' || backendDefaultLang === 'hi')) {
-              if (backendDefaultLang !== 'en') {
-                // Translate the app keys for the default language if not already cached
-                const englishKeys = Object.keys(translations.en);
-                const existingCache = cacheObj[backendDefaultLang as Language] || {};
-                const translatedCount = englishKeys.filter(k => existingCache[k]).length;
-                const isTranslated = translatedCount >= englishKeys.length * 0.8;
+          // No saved preference — default to English immediately (no flash)
+          // then fetch backend default in background
+          setLanguageState('en');
+          getSettings()
+            .then((settingsRes) => {
+              const backendDefaultLang = settingsRes.data?.defaultLanguage;
+              if (backendDefaultLang && (backendDefaultLang === 'en' || backendDefaultLang === 'mr' || backendDefaultLang === 'hi')) {
+                if (backendDefaultLang !== 'en') {
+                  const englishKeys = Object.keys(translations.en);
+                  const existingCache = cacheObj[backendDefaultLang as Language] || {};
+                  const translatedCount = englishKeys.filter(k => existingCache[k]).length;
+                  const isTranslated = translatedCount >= englishKeys.length * 0.8;
 
-                if (!isTranslated) {
-                  const englishTexts = englishKeys.map(k => translations.en[k]);
-                  const translatedTexts = await translateBatch(englishTexts, backendDefaultLang);
-                  
-                  const newCacheForLang: Record<string, string> = { ...existingCache };
-                  englishKeys.forEach((key, index) => {
-                    newCacheForLang[key] = translatedTexts[index] || translations.en[key];
-                  });
-
-                  cacheObj[backendDefaultLang as Language] = newCacheForLang;
-                  dynamicTranslationsRef.current = { ...cacheObj };
-                  setDynamicTranslations({ ...cacheObj });
-                  await AsyncStorage.setItem('veggie_app_dynamic_translations_v2', JSON.stringify(cacheObj));
+                  if (!isTranslated) {
+                    const englishTexts = englishKeys.map(k => translations.en[k]);
+                    translateBatch(englishTexts, backendDefaultLang).then((translatedTexts) => {
+                      const newCacheForLang: Record<string, string> = { ...existingCache };
+                      englishKeys.forEach((key, index) => {
+                        newCacheForLang[key] = translatedTexts[index] || translations.en[key];
+                      });
+                      const newCacheObj = { ...cacheObj, [backendDefaultLang]: newCacheForLang };
+                      dynamicTranslationsRef.current = newCacheObj;
+                      setDynamicTranslations(newCacheObj);
+                      AsyncStorage.setItem('veggie_app_dynamic_translations_v2', JSON.stringify(newCacheObj)).catch(() => undefined);
+                      setLanguageState(backendDefaultLang as Language);
+                    }).catch(() => undefined);
+                  } else {
+                    setLanguageState(backendDefaultLang as Language);
+                  }
                 }
+                AsyncStorage.setItem('veggie_app_language', backendDefaultLang).catch(() => undefined);
               }
-              setLanguageState(backendDefaultLang as Language);
-            }
-          } catch (apiErr) {
-            console.warn('Failed to fetch default language from backend settings', apiErr);
-          }
+            })
+            .catch(() => undefined); // silently ignore if backend unreachable
         }
       } catch (err) {
         console.error('Failed to load language/cache from storage', err);
@@ -283,6 +286,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     };
     init();
   }, []);
+
 
   const updateTranslationCache = useCallback((nextCache: Record<Language, Record<string, string>>) => {
     dynamicTranslationsRef.current = nextCache;

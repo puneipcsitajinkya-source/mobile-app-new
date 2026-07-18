@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import {
-  View, Text, Image, ScrollView, TouchableOpacity,
+  View, Text, ScrollView, TouchableOpacity,
   StyleSheet,
 } from 'react-native';
+import PremiumImage from '../components/PremiumImage';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../navigation/AppNavigator';
-import { getProduct } from '../services/api';
+import { getProduct, resolveMediaUrl } from '../services/api';
 import { getSubcategory } from '../services/api';
 import { useCart } from '../hooks/useCart';
 import { useLanguage } from '../hooks/useLanguage';
@@ -94,13 +95,13 @@ export default function ProductDetailScreen({ route, navigation }: Props) {
   return (
     <View style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
-        {product.image ? (
-          <Image source={{ uri: product.image }} style={styles.image} resizeMode="contain" />
-        ) : (
-          <View style={[styles.image, styles.imagePlaceholder]}>
-            <Ionicons name="leaf-outline" size={56} color="#a855f7" />
-          </View>
-        )}
+        <PremiumImage
+          source={resolveMediaUrl(product.image) ? { uri: resolveMediaUrl(product.image)! } : null}
+          style={styles.image}
+          resizeMode="contain"
+          fallbackIcon="leaf-outline"
+          categoryName={product.category}
+        />
         {(product.discount ?? 0) > 0 && (
           <View style={styles.imageDiscountBadge}>
             <Text style={styles.imageDiscountText}>{product.discount}% OFF</Text>
