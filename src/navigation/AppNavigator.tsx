@@ -11,7 +11,10 @@ import CheckoutScreen from '../screens/CheckoutScreen';
 import SuccessScreen from '../screens/SuccessScreen';
 import OrdersScreen from '../screens/OrdersScreen';
 import CategoryProductsScreen from '../screens/CategoryProductsScreen';
+import FeedbackScreen from '../screens/FeedbackScreen';
 import { useCart } from '../hooks/useCart';
+import { useLanguage } from '../hooks/useLanguage';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export type RootStackParamList = {
   Main: undefined;
@@ -25,6 +28,7 @@ export type TabParamList = {
   Home: undefined;
   Cart: undefined;
   Orders: undefined;
+  Feedback: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -49,7 +53,7 @@ function HomeStackScreen() {
       <HomeStackNav.Screen
         name="ProductDetail"
         component={ProductDetailScreen}
-        options={{ title: 'Product Details', headerShown: true }}
+        options={{ headerShown: false }}
       />
       <HomeStackNav.Screen
         name="CategoryProducts"
@@ -62,6 +66,8 @@ function HomeStackScreen() {
 
 function MainTabs() {
   const { totalItems } = useCart();
+  const insets = useSafeAreaInsets();
+  const { t } = useLanguage();
 
   return (
     <Tab.Navigator
@@ -70,9 +76,9 @@ function MainTabs() {
         tabBarStyle: {
           backgroundColor: '#ffffff',
           borderTopColor: '#f1f5f9',
-          paddingBottom: 30,
+          paddingBottom: insets.bottom > 0 ? insets.bottom - 4 : 8,
           paddingTop: 6,
-          height: 84,
+          height: 54 + (insets.bottom > 0 ? insets.bottom - 4 : 8),
           shadowColor: '#0f172a',
           shadowOffset: { width: 0, height: -3 },
           shadowOpacity: 0.05,
@@ -110,9 +116,19 @@ function MainTabs() {
         name="Orders"
         component={OrdersScreen}
         options={{
-          tabBarLabel: 'My Orders',
+          tabBarLabel: t('ordersTitle') || 'My Orders',
           tabBarIcon: ({ focused }) => (
             <Ionicons name={focused ? 'receipt' : 'receipt-outline'} size={22} color="#4b5563" />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Feedback"
+        component={FeedbackScreen}
+        options={{
+          tabBarLabel: t('typeFeedback') || 'Feedback',
+          tabBarIcon: ({ focused }) => (
+            <Ionicons name={focused ? 'chatbox-ellipses' : 'chatbox-ellipses-outline'} size={22} color="#4b5563" />
           ),
         }}
       />

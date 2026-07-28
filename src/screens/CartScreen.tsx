@@ -11,10 +11,12 @@ import { useLanguage } from '../hooks/useLanguage';
 import { getSettings, resolveMediaUrl } from '../services/api';
 import { Ionicons } from '@expo/vector-icons';
 import PremiumLoader from '../components/PremiumLoader';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'Main'> };
 
 export default function CartScreen({ navigation }: Props) {
+  const insets = useSafeAreaInsets();
   const { items, increaseQty, decreaseQty, totalAmount, totalSavings, totalItems } = useCart();
   const { language, t, tProduct } = useLanguage();
   
@@ -69,7 +71,7 @@ export default function CartScreen({ navigation }: Props) {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: Math.max(insets.top, 16) }]}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={{ paddingRight: 12 }}>
           <Ionicons name="arrow-back" size={24} color="#0f172a" />
         </TouchableOpacity>
@@ -79,7 +81,7 @@ export default function CartScreen({ navigation }: Props) {
       {loading ? (
         <PremiumLoader message="Loading cart" subMessage="Preparing your order" fullScreen />
       ) : (
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 75 }} showsVerticalScrollIndicator={false}>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 80 + insets.bottom }} showsVerticalScrollIndicator={false}>
           {/* Delivery Promise */}
           <View style={styles.deliveryBox}>
             <View style={styles.deliveryBoxIcon}>
@@ -182,7 +184,7 @@ export default function CartScreen({ navigation }: Props) {
       )}
 
       {!loading && (
-        <View style={styles.footer}>
+        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 16) }]}>
           <TouchableOpacity
             style={styles.checkoutBtn}
             onPress={() => navigation.navigate('Checkout')}
@@ -206,7 +208,7 @@ export default function CartScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f1f5f9' },
   header: {
-    paddingHorizontal: 20, paddingTop: 56, paddingBottom: 16,
+    paddingHorizontal: 20, paddingBottom: 16,
     backgroundColor: '#ffffff',
     flexDirection: 'row', alignItems: 'center',
     shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2,
@@ -247,7 +249,7 @@ const styles = StyleSheet.create({
   savingsBox: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#f0fdf4', padding: 12, borderRadius: 8, marginTop: 16 },
   savingsText: { fontSize: 13, fontWeight: '700', color: '#16a34a' },
   footer: {
-    position: 'absolute', bottom: 0, left: 0, right: 0, padding: 16, paddingBottom: 28,
+    position: 'absolute', bottom: 0, left: 0, right: 0, padding: 16,
     backgroundColor: '#ffffff', borderTopWidth: 1, borderTopColor: '#f1f5f9',
     shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 10,
   },

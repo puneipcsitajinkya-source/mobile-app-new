@@ -9,12 +9,22 @@ const expoApiUrl =
   (Constants.expoConfig?.extra?.apiUrl as string | undefined) ||
   ((Constants.manifest as any)?.extra?.apiUrl as string | undefined);
 
+// Dynamically resolve host IP in development
+const getDevServerUrl = () => {
+  const hostUri = Constants.expoConfig?.hostUri || (Constants.manifest as any)?.debuggerHost;
+  if (!hostUri) return undefined;
+  const ip = hostUri.split(':')[0];
+  return ip ? `http://${ip}:3001` : undefined;
+};
+
+const devHostUrl = getDevServerUrl();
 const DEFAULT_API_BASE = Platform.OS === 'android' ? 'http://10.0.2.2:3001' : 'http://127.0.0.1:3001';
 const API_BASE = [
   expoApiUrl,
   envUrl,
   Platform.OS === 'android' ? androidUrl : undefined,
   Platform.OS === 'ios' ? iosUrl : undefined,
+  devHostUrl,
   DEFAULT_API_BASE,
 ]
   .filter((value): value is string => Boolean(value && value.trim()))
@@ -27,6 +37,7 @@ console.log('API source values:', {
   envUrl,
   androidUrl,
   iosUrl,
+  devHostUrl,
   default: DEFAULT_API_BASE,
 });
 
@@ -54,9 +65,19 @@ export const resolveMediaUrl = (value?: string) => {
 
 export const getProducts = (params?: any) => api.get('/products', { params });
 export const getProduct = (id: string) => api.get(`/products/${id}`);
+export const getOrder = (id: string) => api.get(`/orders/${id}`);
 export const getSubcategory = (id: string) => api.get(`/subcategories/${id}`);
 export const placeOrder = (data: object) => api.post('/orders', data);
 export const getOrdersByMobile = (mobile: string) => api.get(`/orders/customer/${mobile}`);
 export const getCategories = () => api.get('/categories?showOnApp=true');
 export const getSubcategories = (categoryId: string) => api.get('/subcategories', { params: { categoryId } });
 export const getSettings = () => api.get('/settings');
+export const updateOrderStatus = (id: string, status: string) => api.patch(`/orders/${id}/status`, { status });
+export const submitFeedback = (data: {
+  name?: string;
+  email?: string;
+  type: 'feedback' | 'report';
+  rating?: number;
+  message: string;
+}) => api.post('/feedback', data);
+

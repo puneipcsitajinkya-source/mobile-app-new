@@ -28,6 +28,7 @@ const STORAGE_CONTACT_KEY = '@checkout_contact';
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'Checkout'> };
 
 export default function CheckoutScreen({ navigation }: Props) {
+  const insets: any = useSafeAreaInsets();
   const { items, totalAmount, clearCart, setLatestOrder } = useCart();
   const [mobile, setMobile] = useState('');
   const [confirmMobile, setConfirmMobile] = useState('');
@@ -53,7 +54,7 @@ export default function CheckoutScreen({ navigation }: Props) {
   const addressStorageLoaded = useRef(false);
   const contactStorageLoaded = useRef(false);
   const { height } = useWindowDimensions();
-  const insets = useSafeAreaInsets();
+
   const headerHeight = Math.max(60, Math.round((height - insets.top) * 0.2));
 
   useEffect(() => {
@@ -99,21 +100,44 @@ export default function CheckoutScreen({ navigation }: Props) {
   // Auto-save address when it changes
   useEffect(() => {
     if (!addressStorageLoaded.current) return;
-    AsyncStorage.setItem(STORAGE_ADDRESS_KEY, address).catch(() => {});
+    AsyncStorage.setItem(STORAGE_ADDRESS_KEY, address).catch(() => { });
   }, [address]);
 
   // Auto-save contact numbers when they change
   useEffect(() => {
     if (!contactStorageLoaded.current) return;
-    AsyncStorage.setItem(STORAGE_CONTACT_KEY, JSON.stringify({ mobile, confirmMobile })).catch(() => {});
+    AsyncStorage.setItem(STORAGE_CONTACT_KEY, JSON.stringify({ mobile, confirmMobile })).catch(() => { });
   }, [mobile, confirmMobile]);
 
   // Clear saved address and current delivery fields
   const handleClearSaved = () => {
-    AsyncStorage.removeItem(STORAGE_ADDRESS_KEY).catch(() => {});
+    AsyncStorage.removeItem(STORAGE_ADDRESS_KEY).catch(() => { });
     setAddress('');
     setLocation(null);
     setLocationError('');
+  };
+
+  const handleNewAddress = () => {
+    Alert.alert(
+      t("New Address"),
+      t("Are you sure you want to clear all fields to enter a new address?"),
+      [
+        { text: t('cancel') || "Cancel", style: "cancel" },
+        {
+          text: t('clear') || "Clear All",
+          style: "destructive",
+          onPress: () => {
+            AsyncStorage.removeItem(STORAGE_ADDRESS_KEY).catch(() => { });
+            AsyncStorage.removeItem(STORAGE_CONTACT_KEY).catch(() => { });
+            setAddress('');
+            setMobile('');
+            setConfirmMobile('');
+            setLocation(null);
+            setLocationError('');
+          }
+        }
+      ]
+    );
   };
 
   useEffect(() => {
@@ -236,6 +260,17 @@ export default function CheckoutScreen({ navigation }: Props) {
         totalAmount: grandTotal,
       });
       setLatestOrder(res.data);
+      // Save order locally to device orders list (max 12 orders)
+      try {
+        const savedOrdersStr = await AsyncStorage.getItem('@device_orders');
+        const existingOrders = savedOrdersStr ? JSON.parse(savedOrdersStr) : [];
+        if (!existingOrders.some((o: any) => o._id === res.data._id)) {
+          const updatedOrders = [res.data, ...existingOrders].slice(0, 12);
+          await AsyncStorage.setItem('@device_orders', JSON.stringify(updatedOrders));
+        }
+      } catch (err) {
+        console.error('Failed to save order locally:', err);
+      }
       clearCart();
       navigation.replace('Success', { orderId: res.data._id });
     } catch {
@@ -254,9 +289,21 @@ export default function CheckoutScreen({ navigation }: Props) {
   const currentGstAmount = fees.gstEnabled ? Number((subtotal * Number(fees.gstPercentage) / 100).toFixed(2)) : 0;
   const currentHandlingFee = fees.handlingFeeEnabled ? Number(fees.handlingFee) : 0;
   const grandTotal = Number((subtotal + currentGstAmount + currentDeliveryFee + currentHandlingFee).toFixed(2));
+  const hasAnyDetail = Boolean(address.trim() || mobile.trim() || confirmMobile.trim() || location);
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+
+      {hasAnyDetail && (
+        <TouchableOpacity 
+          style={styles.topClearBtn} 
+          onPress={handleNewAddress}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="trash-outline" size={15} color="#a855f7" />
+          <Text style={styles.topClearBtnText}>Clear all detail</Text>
+        </TouchableOpacity>
+      )}
 
       {!isConnected && (
         <View style={styles.noticeBox}>
@@ -278,7 +325,7 @@ export default function CheckoutScreen({ navigation }: Props) {
           keyboardType="phone-pad"
           maxLength={10}
           value={mobile}
-          onChangeText={setMobile}
+          onChangeText={(text) => setMobile(text.replace(/[^0-9]/g, ''))}
         />
         {mobile.length === 10 && (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 }}>
@@ -305,7 +352,7 @@ export default function CheckoutScreen({ navigation }: Props) {
           keyboardType="phone-pad"
           maxLength={10}
           value={confirmMobile}
-          onChangeText={setConfirmMobile}
+          onChangeText={(text) => setConfirmMobile(text.replace(/[^0-9]/g, ''))}
         />
         {confirmMobile.length === 10 && confirmMobile === mobile && (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 }}>
@@ -477,7 +524,7 @@ export default function CheckoutScreen({ navigation }: Props) {
         )}
       </TouchableOpacity>
 
-      <View style={{ height: 56, marginBottom: 16 }} />
+      <View style={{ height: Math.max(insets.bottom, 24) }} />
     </ScrollView>
   );
 }
@@ -569,4 +616,28 @@ const styles = StyleSheet.create({
   placeBtnText: { color: '#fff', fontSize: 16, fontWeight: '800', textAlign: 'center', flexShrink: 1, flexWrap: 'wrap' },
   clearBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8, alignSelf: 'flex-end' },
   clearBtnText: { fontSize: 12, color: '#94a3b8', fontWeight: '500' },
+  topClearBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 4,
+    backgroundColor: '#faf5ff',
+    borderWidth: 1,
+    borderColor: '#e9d5ff',
+    borderRadius: 12,
+    paddingVertical: 12,
+    shadowColor: '#a855f7',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  topClearBtnText: {
+    fontSize: 14,
+    color: '#a855f7',
+    fontWeight: '700',
+  },
 });

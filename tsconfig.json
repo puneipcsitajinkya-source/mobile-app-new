@@ -5,5 +5,10 @@
     "module": "esnext",
     "moduleResolution": "bundler",
     "jsx": "react-jsx"
-  }
+  },
+  "exclude": [
+    "node_modules",
+    "dist",
+    ".expo"
+  ]
 }

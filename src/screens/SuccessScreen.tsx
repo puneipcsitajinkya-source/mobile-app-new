@@ -1,10 +1,12 @@
-import React, { useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
+import React, { useEffect, useState, useRef } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Animated, Alert } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useLanguage } from '../hooks/useLanguage';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { updateOrderStatus } from '../services/api';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Success'>;
@@ -13,9 +15,13 @@ type Props = {
 
 export default function SuccessScreen({ navigation, route }: Props) {
   const { orderId } = route.params;
-  const scaleAnim = new Animated.Value(0);
-  const fadeAnim = new Animated.Value(0);
+  const scaleAnim = useRef(new Animated.Value(0)).current;
+  const fadeAnim = useRef(new Animated.Value(0)).current;
   const { t } = useLanguage();
+
+  const [timeLeft, setTimeLeft] = useState(120);
+  const [cancelled, setCancelled] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
   useEffect(() => {
     Animated.sequence([
@@ -24,15 +30,75 @@ export default function SuccessScreen({ navigation, route }: Props) {
     ]).start();
   }, []);
 
+  useEffect(() => {
+    if (timeLeft <= 0 || cancelled) return;
+    const interval = setInterval(() => {
+      setTimeLeft((t) => t - 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [timeLeft, cancelled]);
+
+  const handleCancel = () => {
+    Alert.alert(
+      t("Cancel Order"),
+      t("Are you sure you want to cancel this order?"),
+      [
+        { text: t('no') || "No", style: "cancel" },
+        {
+          text: t('yes') || "Yes, Cancel",
+          style: "destructive",
+          onPress: async () => {
+            setCancelling(true);
+            try {
+              await updateOrderStatus(orderId, 'closed');
+              setCancelled(true);
+
+              // Update local orders list cache in AsyncStorage
+              const savedOrdersStr = await AsyncStorage.getItem('@device_orders');
+              if (savedOrdersStr) {
+                const existingOrders = JSON.parse(savedOrdersStr);
+                const updatedOrders = existingOrders.map((o: any) =>
+                  o._id === orderId ? { ...o, status: 'closed' } : o
+                );
+                await AsyncStorage.setItem('@device_orders', JSON.stringify(updatedOrders));
+              }
+
+              Alert.alert(t('successTitle') || "Success", t('orderCancelledMsg') || "Order has been cancelled successfully.");
+            } catch (err) {
+              console.error('Failed to cancel order:', err);
+              Alert.alert(t('errorTitle') || "Error", t('cancelFailedMsg') || "Failed to cancel order. Please try again.");
+            } finally {
+              setCancelling(false);
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const formatTime = (secs: number) => {
+    const mins = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${mins}:${s.toString().padStart(2, '0')}`;
+  };
+
   return (
     <View style={styles.container}>
       <Animated.View style={[styles.iconWrap, { transform: [{ scale: scaleAnim }] }]}>
-        <Ionicons name="checkmark-circle" size={80} color="#22c55e" />
+        <Ionicons
+          name={cancelled ? "close-circle" : "checkmark-circle"}
+          size={80}
+          color={cancelled ? "#ef4444" : "#22c55e"}
+        />
       </Animated.View>
 
       <Animated.View style={{ opacity: fadeAnim, alignItems: 'center' }}>
-        <Text style={styles.title}>{t('orderPlaced')}</Text>
-        <Text style={styles.subtitle}>{t('orderPlacedSub')}</Text>
+        <Text style={styles.title}>
+          {cancelled ? (t('orderCancelledTitle') || "Order Cancelled") : t('orderPlaced')}
+        </Text>
+        <Text style={styles.subtitle}>
+          {cancelled ? (t('orderCancelledSub') || "Your order has been cancelled successfully.") : t('orderPlacedSub')}
+        </Text>
 
         <View style={styles.orderIdBox}>
           <Text style={styles.orderIdLabel}>{t('orderIdLabel')}</Text>
@@ -40,7 +106,7 @@ export default function SuccessScreen({ navigation, route }: Props) {
         </View>
 
         <Text style={styles.info}>
-          {t('thankYou')}
+          {cancelled ? "" : t('thankYou')}
         </Text>
 
         <TouchableOpacity
@@ -53,6 +119,22 @@ export default function SuccessScreen({ navigation, route }: Props) {
             <Text style={styles.homeBtnText}>{t('continueShopping')}</Text>
           </View>
         </TouchableOpacity>
+
+        {timeLeft > 0 && !cancelled && (
+          <TouchableOpacity
+            style={[styles.cancelBtn, cancelling && { opacity: 0.6 }]}
+            onPress={handleCancel}
+            disabled={cancelling}
+            activeOpacity={0.85}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Ionicons name="close-circle-outline" size={18} color="#dc2626" />
+              <Text style={styles.cancelBtnText}>
+                Cancel Order ({formatTime(timeLeft)})
+              </Text>
+            </View>
+          </TouchableOpacity>
+        )}
       </Animated.View>
     </View>
   );
@@ -86,4 +168,21 @@ const styles = StyleSheet.create({
     shadowColor: '#a855f7', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4,
   },
   homeBtnText: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  cancelBtn: {
+    marginTop: 16,
+    backgroundColor: '#fef2f2',
+    borderWidth: 1,
+    borderColor: '#fecaca',
+    borderRadius: 14,
+    paddingVertical: 16,
+    paddingHorizontal: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#dc2626',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  cancelBtnText: { color: '#dc2626', fontSize: 16, fontWeight: '800' },
 });

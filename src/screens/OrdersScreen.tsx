@@ -1,14 +1,16 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, FlatList,
-  StyleSheet, RefreshControl, ScrollView,
+  StyleSheet, RefreshControl, ScrollView, Alert,
 } from 'react-native';
-import { getOrdersByMobile, getSettings } from '../services/api';
+import { getOrder, getSettings, updateOrderStatus } from '../services/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLanguage } from '../hooks/useLanguage';
 import { Ionicons } from '@expo/vector-icons';
 import { useCart } from '../hooks/useCart';
 import { useNetwork } from '../hooks/useNetwork';
 import PremiumLoader from '../components/PremiumLoader';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface OrderItem {
   productId: string;
@@ -33,6 +35,7 @@ interface Order {
 }
 
 export default function OrdersScreen() {
+  const insets = useSafeAreaInsets();
   const { t } = useLanguage();
   const { latestOrder } = useCart();
   const [orders, setOrders] = useState<Order[]>([]);
@@ -41,6 +44,69 @@ export default function OrdersScreen() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [contactPhone, setContactPhone] = useState('9239321112');
   const { onReconnect } = useNetwork();
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      setTick((t) => t + 1);
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const getRemainingTime = (createdAtStr: string) => {
+    const createdAt = new Date(createdAtStr).getTime();
+    const now = Date.now();
+    const diff = 120000 - (now - createdAt); // 2 minutes in ms
+    return Math.max(0, diff);
+  };
+
+  const formatTime = (ms: number) => {
+    const totalSecs = Math.floor(ms / 1000);
+    const mins = Math.floor(totalSecs / 60);
+    const secs = totalSecs % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const handleCancelOrder = (orderId: string) => {
+    Alert.alert(
+      t("Cancel Order"),
+      t("Are you sure you want to cancel this order?"),
+      [
+        { text: t('no') || "No", style: "cancel" },
+        {
+          text: t('yes') || "Yes, Cancel",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              setLoading(true);
+              await updateOrderStatus(orderId, 'closed');
+
+              // Update local state and AsyncStorage
+              const savedOrdersStr = await AsyncStorage.getItem('@device_orders');
+              if (savedOrdersStr) {
+                const existingOrders = JSON.parse(savedOrdersStr);
+                const updatedOrders = existingOrders.map((o: any) =>
+                  o._id === orderId ? { ...o, status: 'closed' } : o
+                );
+                await AsyncStorage.setItem('@device_orders', JSON.stringify(updatedOrders));
+                setOrders(updatedOrders);
+              } else {
+                // fallback if storage was empty, refresh list
+                fetchOrders(false);
+              }
+
+              Alert.alert(t('successTitle') || "Success", t('orderCancelledMsg') || "Order has been cancelled successfully.");
+            } catch (err) {
+              console.error('Failed to cancel order:', err);
+              Alert.alert(t('errorTitle') || "Error", t('cancelFailedMsg') || "Failed to cancel order. Please try again.");
+            } finally {
+              setLoading(false);
+            }
+          }
+        }
+      ]
+    );
+  };
 
   const fetchOrders = useCallback(async (isRefresh = false) => {
     if (isRefresh) {
@@ -50,19 +116,40 @@ export default function OrdersScreen() {
     }
     setErrorMsg(null);
 
-    const activeMobile = latestOrder?.mobile || '9239321112';
-
     try {
-      const res = await getOrdersByMobile(activeMobile);
-      setOrders(res.data || []);
+      const savedOrdersStr = await AsyncStorage.getItem('@device_orders');
+      const rawLocalOrders: Order[] = savedOrdersStr ? JSON.parse(savedOrdersStr) : [];
+      const localOrders = rawLocalOrders.slice(0, 12);
+
+      if (localOrders.length === 0) {
+        setOrders([]);
+        return;
+      }
+
+      // Try to fetch updated status for all local orders in parallel
+      const updatedOrders = await Promise.all(
+        localOrders.map(async (order) => {
+          try {
+            const res = await getOrder(order._id);
+            if (res.data) {
+              return res.data;
+            }
+            return order;
+          } catch (err) {
+            console.warn(`Failed to fetch fresh order status for ${order._id}:`, err);
+            return order;
+          }
+        })
+      );
+
+      const trimmedOrders = updatedOrders.slice(0, 12);
+
+      // Save updated order list back to local storage
+      await AsyncStorage.setItem('@device_orders', JSON.stringify(trimmedOrders));
+      setOrders(trimmedOrders);
     } catch (err) {
       console.error('Error fetching orders:', err);
-      if (latestOrder) {
-        setOrders([latestOrder]);
-      } else {
-        setErrorMsg('Failed to load orders. Please try again.');
-        setOrders([]);
-      }
+      setErrorMsg('Failed to load orders. Please try again.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -123,7 +210,7 @@ export default function OrdersScreen() {
     }
   };
 
-  const visibleOrders = useMemo(() => orders.slice(0, 10), [orders]);
+  const visibleOrders = useMemo(() => orders.slice(0, 12), [orders]);
 
   const renderOrderItem = useCallback(({ item }: { item: Order }) => {
     const statusTheme = getStatusColor(item.status);
@@ -139,18 +226,36 @@ export default function OrdersScreen() {
       <View style={styles.orderCard}>
         {/* Header */}
         <View style={styles.cardHeader}>
-          <View>
+          <View style={{ flex: 1, marginRight: 8 }}>
             <Text style={styles.orderId}>#{item._id.slice(-8).toUpperCase()}</Text>
             <Text style={styles.orderDate}>{orderDate}</Text>
           </View>
 
+          {item.status === 'pending' && getRemainingTime(item.createdAt) > 0 ? (
+            <TouchableOpacity
+              style={styles.cancelBtn}
+              onPress={() => handleCancelOrder(item._id)}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="close-circle-outline" size={14} color="#dc2626" style={{ marginRight: 4 }} />
+              <Text style={styles.cancelBtnText}>
+                Cancel ({formatTime(getRemainingTime(item.createdAt))})
+              </Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={[styles.statusBadge, { backgroundColor: statusTheme.bg }]}>
+              <Text style={[styles.statusText, { color: statusTheme.text }]}>
+                {getStatusLabel(item.status)}
+              </Text>
+            </View>
+          )}
         </View>
 
         <View style={styles.divider} />
 
         {/* Tracking Timeline */}
         <View style={styles.timelineContainer}>
-          {[ 'pending', 'confirmed', 'out_for_delivery', 'delivered', 'closed' ].map((s, index) => {
+          {['pending', 'confirmed', 'out_for_delivery', 'delivered', 'closed'].map((s, index) => {
             const statuses = ['pending', 'confirmed', 'out_for_delivery', 'delivered', 'closed'];
             const labels = ['Order Placed', 'Confirmed', 'Out for Delivery', 'Delivered', 'Closed'];
             const currentIndex = statuses.indexOf(item.status);
@@ -216,12 +321,12 @@ export default function OrdersScreen() {
         </View>
       </View>
     );
-  }, []);
+  }, [tick, handleCancelOrder, t]);
 
   return (
     <View style={styles.container}>
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: Math.max(insets.top, 16) }]}>
         <Text style={styles.headerTitle}>{t('ordersTitle') || 'My Orders'}</Text>
       </View>
 
@@ -266,7 +371,8 @@ export default function OrdersScreen() {
           data={visibleOrders}
           keyExtractor={(item) => item._id}
           renderItem={renderOrderItem}
-          contentContainerStyle={styles.listContainer}
+          extraData={tick}
+          contentContainerStyle={[styles.listContainer, { paddingBottom: 75 + insets.bottom }]}
           showsVerticalScrollIndicator={false}
           initialNumToRender={5}
           maxToRenderPerBatch={5}
@@ -284,7 +390,7 @@ export default function OrdersScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f1f5f9' },
   header: {
-    paddingHorizontal: 20, paddingTop: 56, paddingBottom: 16,
+    paddingHorizontal: 20, paddingBottom: 16,
     backgroundColor: '#ffffff',
     shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 3,
   },
@@ -344,4 +450,19 @@ const styles = StyleSheet.create({
   emptySub: { fontSize: 14, color: '#94a3b8', textAlign: 'center', marginBottom: 20, lineHeight: 20 },
   retryBtn: { backgroundColor: '#a855f7', borderRadius: 10, paddingVertical: 10, paddingHorizontal: 20, justifyContent: 'center', alignItems: 'center' },
   retryBtnText: { color: '#ffffff', fontSize: 14, fontWeight: '700' },
+  cancelBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fef2f2',
+    borderWidth: 1,
+    borderColor: '#fecaca',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  cancelBtnText: {
+    color: '#dc2626',
+    fontSize: 12,
+    fontWeight: '700',
+  },
 });

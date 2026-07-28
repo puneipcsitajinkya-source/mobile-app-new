@@ -7,6 +7,7 @@ type StickyCartProps = {
   cartTotal: number | string;
   onPress: () => void;
   tintColor?: string;
+  bottom?: number;
 };
 
 export default function StickyCart({
@@ -14,13 +15,14 @@ export default function StickyCart({
   cartTotal,
   onPress,
   tintColor = '#7c3aed',
+  bottom,
 }: StickyCartProps) {
   if (totalItems <= 0) {
     return null;
   }
 
   return (
-    <View style={styles.wrapper}>
+    <View style={[styles.wrapper, bottom !== undefined && { bottom }]}>
       <TouchableOpacity
         style={[styles.button, { borderColor: `${tintColor}22` }]}
         activeOpacity={0.9}

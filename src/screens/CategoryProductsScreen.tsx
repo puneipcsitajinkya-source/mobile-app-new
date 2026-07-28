@@ -13,6 +13,7 @@ import { getProducts, getSubcategories, resolveMediaUrl } from '../services/api'
 import { useCart } from '../hooks/useCart';
 import { useLanguage } from '../hooks/useLanguage';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'CategoryProducts'>;
@@ -62,10 +63,24 @@ const ProductCard = React.memo(function ProductCard({
   const hasDiscount = (item.discount ?? 0) > 0;
   const hasMrp = item.mrp != null && item.mrp > item.price;
 
+  const specTags = React.useMemo(() => {
+    if (!item.description) return [];
+    const parts = item.description.split(/[,;\n]/).map(p => p.trim()).filter(p => p.length > 0 && p.length < 24);
+    return parts.slice(0, 2);
+  }, [item.description]);
+
+  const reviewCount = React.useMemo(() => {
+    let hash = 0;
+    for (let i = 0; i < item._id.length; i++) {
+      hash = item._id.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    return Math.abs(hash % 9000) + 1000;
+  }, [item._id]);
+
   return (
     <TouchableOpacity style={[styles.card, { width: cardWidth }]} onPress={() => onPress(item._id)} activeOpacity={0.93}>
 
-      {/* ── Image section (faint purple bg) ── */}
+      {/* ── Image section (white bg) ── */}
       <View style={styles.cardImgContainer}>
         <PremiumImage
           source={resolveMediaUrl(item.image) ? { uri: resolveMediaUrl(item.image)! } : null}
@@ -75,17 +90,66 @@ const ProductCard = React.memo(function ProductCard({
           categoryName={item.category}
         />
 
+        {/* Favorite (heart) icon */}
+        <TouchableOpacity style={styles.favIconBox} activeOpacity={0.75}>
+          <Ionicons name="heart-outline" size={16} color="#94a3b8" />
+        </TouchableOpacity>
+
+        {/* Carousel indicator dots */}
+        <View style={styles.carouselDots}>
+          <View style={[styles.carouselDot, styles.carouselDotActive]} />
+          <View style={styles.carouselDot} />
+          <View style={styles.carouselDot} />
+        </View>
+
         {/* Discount badge — top left */}
         {hasDiscount && (
           <View style={styles.discountBadge}>
             <Text style={styles.discountText}>{item.discount}% OFF</Text>
           </View>
         )}
+      </View>
 
-        {/* Bottom bar: unit + ADD / qty control */}
-        <View style={styles.cardImgBar}>
-          <Text style={styles.cardUnitOverlay} numberOfLines={1}>{item.unit || '1 pc'}</Text>
+      {/* ── Content below image ── */}
+      <View style={styles.cardContent}>
+        
+        {/* Delivery Row */}
+        <View style={styles.deliveryRow}>
+          <Ionicons name="time" size={11} color="#64748b" style={{ marginRight: 2 }} />
+          <Text style={styles.deliveryText}>8 mins</Text>
+        </View>
 
+        {/* Name */}
+        <Text style={styles.cardName} numberOfLines={2}>{tProduct(item.name)}</Text>
+
+        {/* Spec Tags */}
+        <View style={styles.specTagsContainer}>
+          {specTags.length > 0 ? (
+            specTags.map((tag, idx) => (
+              <View key={idx} style={styles.specTag}>
+                <Text style={styles.specTagText} numberOfLines={1}>{tag}</Text>
+              </View>
+            ))
+          ) : (
+            <View style={styles.specTag}>
+              <Text style={styles.specTagText}>Premium Quality</Text>
+            </View>
+          )}
+        </View>
+
+        {/* Rating Row */}
+        <View style={styles.ratingRow}>
+          <View style={styles.stars}>
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Ionicons key={i} name="star" size={10} color={i < 4 ? '#fbbf24' : '#cbd5e1'} />
+            ))}
+          </View>
+          <Text style={styles.ratingCount}>{reviewCount.toLocaleString()}</Text>
+        </View>
+
+        {/* Unit and Action Row */}
+        <View style={styles.actionRow}>
+          <Text style={styles.cardUnitText}>{item.unit || '1 unit'}</Text>
           {qty > 0 ? (
             <View style={styles.qtyControl}>
               <TouchableOpacity style={styles.qtyBtn} onPress={() => onDecrease(item._id)} activeOpacity={0.7}>
@@ -102,24 +166,24 @@ const ProductCard = React.memo(function ProductCard({
             </TouchableOpacity>
           )}
         </View>
-      </View>
 
-      {/* ── Content below image ── */}
-      <View style={styles.cardContent}>
-        <View style={styles.priceRow}>
-          <Text style={styles.cardPrice}>₹{item.price}</Text>
-          {hasMrp && <Text style={styles.cardMrp}>₹{item.mrp}</Text>}
+        {/* Price Row */}
+        <View style={styles.priceContainer}>
+          <View style={styles.priceSubRow}>
+            <Text style={styles.cardPrice}>₹{item.price}</Text>
+            {hasMrp && <Text style={styles.cardMrp}>₹{item.mrp}</Text>}
+          </View>
+          {hasMrp && (
+            <Text style={styles.discountLabel}>₹{item.mrp! - item.price} OFF</Text>
+          )}
         </View>
-        {hasDiscount && (
-          <Text style={styles.discountLabel}>{item.discount}% OFF on MRP</Text>
-        )}
-        <Text style={styles.cardName} numberOfLines={3}>{tProduct(item.name)}</Text>
       </View>
     </TouchableOpacity>
   );
 });
 
 export default function CategoryProductsScreen({ navigation, route }: Props) {
+  const insets = useSafeAreaInsets();
   const { categoryName } = route.params;
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -256,7 +320,7 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
               data={subcategoryItems}
               keyExtractor={(item) => item._id}
               showsVerticalScrollIndicator={false}
-              contentContainerStyle={styles.subcategoryList}
+              contentContainerStyle={[styles.subcategoryList, { paddingBottom: 100 + insets.bottom }]}
               renderItem={({ item }) => {
                 const isSelected = (item._id !== 'all' && item._id === selectedSubcategory) || (item._id === 'all' && !selectedSubcategory);
                 const isAllTab = item._id === 'all';
@@ -271,6 +335,7 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
                     onPress={() => setSelectedSubcategory(isAllTab ? '' : item._id)}
                     activeOpacity={0.8}
                   >
+                    {isSelected && <View style={styles.activeSidebarIndicator} />}
                     {!isAllTab && (
                       <PremiumImage
                         source={resolveMediaUrl(item.image) ? { uri: resolveMediaUrl(item.image)! } : null}
@@ -298,7 +363,7 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
               keyExtractor={item => item._id}
               extraData={cart}
               numColumns={2}
-              contentContainerStyle={styles.grid}
+              contentContainerStyle={[styles.grid, { paddingBottom: 90 + insets.bottom }]}
               showsVerticalScrollIndicator={false}
               initialNumToRender={12}
               maxToRenderPerBatch={12}
@@ -326,7 +391,7 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
           keyExtractor={item => item._id}
           extraData={cart}
           numColumns={2}
-          contentContainerStyle={styles.grid}
+          contentContainerStyle={[styles.grid, { paddingBottom: 90 + insets.bottom }]}
           showsVerticalScrollIndicator={false}
           initialNumToRender={12}
           maxToRenderPerBatch={12}
@@ -351,6 +416,7 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
         cartTotal={cartTotal}
         onPress={() => navigation.navigate('Cart' as any)}
         tintColor="#a855f7"
+        bottom={insets.bottom + 16}
       />
     </View>
   );
@@ -361,57 +427,60 @@ const styles = StyleSheet.create({
 
   contentArea: { flex: 1 },
   mainContent: { flex: 1, flexDirection: 'row', backgroundColor: '#f8fafc' },
-  subcategoryColumn: { width: 96, backgroundColor: '#ffffff', paddingTop: 12, paddingBottom: 12, borderRightWidth: 1, borderRightColor: '#e2e8f0', alignItems: 'center' },
-  productsColumn: { flex: 1 },
+  subcategoryColumn: { width: 96, backgroundColor: '#f8fafc', paddingTop: 12, paddingBottom: 12, borderRightWidth: 1, borderRightColor: '#e2e8f0', alignItems: 'center' },
+  productsColumn: { flex: 1, backgroundColor: '#ffffff' },
   subcategorySectionHeader: { paddingHorizontal: 12, marginBottom: 12 },
   subcategorySectionTitle: { fontSize: 15, fontWeight: '800', color: '#0f172a' },
   subcategorySectionCount: { fontSize: 11, color: '#64748b', marginTop: 4 },
   subcategoryList: { paddingHorizontal: 6, paddingBottom: 100 },
   subcategorySeparator: { height: 10 },
   subcategoryCard: {
-    width: 72,
-    minHeight: 72,
-    backgroundColor: '#f8fafc',
-    borderRadius: 18,
-    paddingVertical: 8,
-    paddingHorizontal: 6,
+    width: 76,
+    minHeight: 76,
+    backgroundColor: 'transparent',
+    borderRadius: 0,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
     alignItems: 'center',
     justifyContent: 'flex-start',
-    borderWidth: 1,
-    borderColor: 'transparent',
+    borderWidth: 0,
+    position: 'relative',
+  },
+  activeSidebarIndicator: {
+    position: 'absolute',
+    left: 0,
+    top: '20%',
+    bottom: '20%',
+    width: 4,
+    backgroundColor: '#7c3aed',
+    borderTopRightRadius: 4,
+    borderBottomRightRadius: 4,
   },
   subcategoryCardActive: {
-    backgroundColor: '#7c3aed',
-    borderColor: '#6d28d9',
+    backgroundColor: '#ffffff',
   },
   subcategoryCardImage: {
-    width: 56,
-    height: 56,
-    borderRadius: 12,
-    backgroundColor: '#ede9fe',
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#f1f5f9',
     marginBottom: 6,
   },
   subcategoryCardIcon: {
     width: 44,
     height: 44,
-    borderRadius: 12,
-    backgroundColor: '#ede9fe',
+    borderRadius: 22,
+    backgroundColor: '#f1f5f9',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 6,
   },
   subcategoryCardIconActive: { backgroundColor: '#ffffff' },
   subcategoryCardIconText: { fontSize: 22, color: '#7c3aed' },
-  subcategoryCardIconTextActive: { color: '#a855f7' },
-  subcategoryCardLabel: { fontSize: 11, fontWeight: '700', color: '#475569', textAlign: 'center' },
-  subcategoryCardLabelActive: { color: '#ffffff' },
-  subcategoryCardShadow: {
-    shadowColor: '#7c3aed',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.08,
-    shadowRadius: 14,
-    elevation: 4,
-  },
+  subcategoryCardIconTextActive: { color: '#7c3aed' },
+  subcategoryCardLabel: { fontSize: 10.5, fontWeight: '500', color: '#64748b', textAlign: 'center', lineHeight: 14 },
+  subcategoryCardLabelActive: { color: '#7c3aed', fontWeight: '800' },
+  subcategoryCardShadow: {},
   productList: { flex: 1 },
   grid: { padding: 6, paddingBottom: 90 },
 
@@ -419,124 +488,187 @@ const styles = StyleSheet.create({
   card: {
     margin: 5,
     backgroundColor: '#ffffff',
-    borderRadius: 16,
+    borderRadius: 12,
     overflow: 'hidden',
-    shadowColor: '#7c3aed',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.07,
-    shadowRadius: 10,
-    elevation: 3,
+    borderWidth: 1,
+    borderColor: '#f1f5f9',
   },
   cardImgContainer: {
     width: '100%',
-    height: 160,
-    backgroundColor: '#f0ebff',   // faint purple theme
+    height: 120,
+    backgroundColor: '#ffffff',
     position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingTop: 8,
+    paddingTop: 12,
   },
   cardImg: {
-    width: '82%',
-    height: '78%',
+    width: '85%',
+    height: '80%',
     resizeMode: 'contain',
   },
-  cardImgPlaceholder: {
-    flex: 1,
+  favIconBox: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#f1f5f9',
+    zIndex: 10,
+  },
+  carouselDots: {
+    position: 'absolute',
+    bottom: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    gap: 3,
+  },
+  carouselDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#cbd5e1',
+  },
+  carouselDotActive: {
+    backgroundColor: '#64748b',
+    width: 6,
   },
   discountBadge: {
     position: 'absolute',
     top: 8,
     left: 8,
     backgroundColor: '#7c3aed',
-    borderRadius: 6,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
   },
-  discountText: { color: '#fff', fontSize: 9, fontWeight: '800' },
+  discountText: { color: '#fff', fontSize: 8.5, fontWeight: '800' },
 
-  // Bottom bar overlaid on image
-  cardImgBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
+  // Content below image
+  cardContent: { paddingHorizontal: 10, paddingVertical: 10 },
+  deliveryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  deliveryText: {
+    fontSize: 9.5,
+    fontWeight: '800',
+    color: '#64748b',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  cardName: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#1f2937',
+    lineHeight: 16,
+    height: 32,
+    marginBottom: 6,
+  },
+  specTagsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginBottom: 6,
+    minHeight: 18,
+  },
+  specTag: {
+    backgroundColor: '#faf5ff',
+    borderWidth: 1,
+    borderColor: '#e9d5ff',
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+  },
+  specTagText: {
+    fontSize: 8.5,
+    color: '#7c3aed',
+    fontWeight: '600',
+  },
+  ratingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 10,
+  },
+  stars: {
+    flexDirection: 'row',
+    gap: 1,
+  },
+  ratingCount: {
+    fontSize: 10,
+    color: '#94a3b8',
+    fontWeight: '500',
+  },
+  actionRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 8,
-    paddingVertical: 7,
-    backgroundColor: 'rgba(240,235,255,0.92)',
-    zIndex: 20,
-    elevation: 20,
+    marginBottom: 8,
+    height: 30,
   },
-  cardUnitOverlay: {
+  cardUnitText: {
     fontSize: 11,
-    color: '#4c1d95',
+    color: '#64748b',
     fontWeight: '600',
-    flex: 1,
-    marginRight: 6,
   },
-  // ADD button
   addBtn: {
     backgroundColor: '#ffffff',
     borderWidth: 1.5,
     borderColor: '#7c3aed',
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 5,
-    minWidth: 60,
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    minWidth: 54,
     alignItems: 'center',
   },
-  addBtnText: { color: '#7c3aed', fontSize: 13, fontWeight: '800' },
-  // Qty stepper (replaces ADD when item in cart)
+  addBtnText: { color: '#7c3aed', fontSize: 11.5, fontWeight: '800' },
   qtyControl: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#7c3aed',
-    borderRadius: 8,
+    borderRadius: 6,
     overflow: 'hidden',
-    minWidth: 80,
-    height: 32,
+    minWidth: 70,
+    height: 28,
   },
   qtyBtn: {
-    width: 28,
-    height: 32,
+    width: 22,
+    height: 28,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  qtyBtnText: { color: '#ffffff', fontSize: 18, fontWeight: '700', lineHeight: 22 },
+  qtyBtnText: { color: '#ffffff', fontSize: 15, fontWeight: '700' },
   qtyValue: {
     flex: 1,
     textAlign: 'center',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '800',
     color: '#ffffff',
   },
-
-  // Content below image
-  cardContent: { padding: 10 },
-  priceRow: {
+  priceContainer: {
+    marginTop: 2,
+  },
+  priceSubRow: {
     flexDirection: 'row',
     alignItems: 'baseline',
-    gap: 6,
-    marginBottom: 2,
+    gap: 4,
   },
-  cardPrice: { fontSize: 16, fontWeight: '800', color: '#0f172a' },
-  cardMrp: { fontSize: 12, color: '#94a3b8', textDecorationLine: 'line-through' },
+  cardPrice: { fontSize: 13.5, fontWeight: '800', color: '#111827' },
+  cardMrp: { fontSize: 10.5, color: '#94a3b8', textDecorationLine: 'line-through' },
   discountLabel: {
-    fontSize: 11,
-    color: '#7c3aed',
+    fontSize: 10,
+    color: '#2563eb',
     fontWeight: '700',
-    marginBottom: 4,
-  },
-  cardName: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: '#374151',
-    lineHeight: 17,
+    marginTop: 2,
   },
 
   emptyState: {

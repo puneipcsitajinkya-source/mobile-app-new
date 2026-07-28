@@ -12,11 +12,12 @@ import { CompositeNavigationProp } from '@react-navigation/native';
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList, TabParamList } from '../navigation/AppNavigator';
-import { getProducts, getCategories, resolveMediaUrl } from '../services/api';
+import { getProducts, getCategories, resolveMediaUrl, getSettings } from '../services/api';
 import { useCart } from '../hooks/useCart';
 import { useLanguage } from '../hooks/useLanguage';
 import { useNetwork } from '../hooks/useNetwork';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type Props = {
   navigation: CompositeNavigationProp<
@@ -50,25 +51,25 @@ const APP_LOGO = require('../../assets/icon.png');
 
 const PROMO_ITEMS = [
   {
-    title: 'Super Fast Delivery',
-    subtitle: 'Fresh groceries in minutes',
-    badge: 'Priority',
-    image: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&q=80&w=500',
-    backgroundColor: '#7c3aed',
+    title: 'Upto 50% Off Today',
+    subtitle: 'Get amazing discounts on all premium groceries & daily essentials',
+    badge: 'BEST OFFER',
+    image: 'https://images.unsplash.com/photo-1506617498300-38435a0950e8?w=800&q=80',
+    backgroundColor: '#a21caf', // Vibrant Magenta
   },
   {
-    title: 'Premium Savings',
-    subtitle: 'Get up to 15% off on daily essentials',
-    badge: 'Limited Offer',
-    image: 'https://images.unsplash.com/photo-1514996937319-344454492b37?auto=format&fit=crop&q=80&w=500',
-    backgroundColor: '#0f766e',
+    title: 'Low Price Guaranteed',
+    subtitle: 'Unbeatable prices on fresh vegetables, milk, bread & eggs',
+    badge: 'LOWEST PRICE',
+    image: 'https://images.unsplash.com/photo-1588964895597-cfccd6e2dbf9?w=800&q=80',
+    backgroundColor: '#15803d', // Vibrant Green
   },
   {
-    title: 'New Arrivals',
-    subtitle: 'Exclusive store deals just for you',
-    badge: 'Just In',
-    image: 'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&q=80&w=500',
-    backgroundColor: '#f59e0b',
+    title: 'Mega Savings Week',
+    subtitle: 'Save big on your monthly grocery list with super saver packs',
+    badge: 'SUPER VALUE',
+    image: 'https://images.unsplash.com/photo-1607349913338-fca6f7fc42d0?w=800&q=80',
+    backgroundColor: '#ea580c', // Vibrant Orange
   },
 ];
 
@@ -168,6 +169,7 @@ const ProductCard = memo(function ProductCard({
 });
 
 export default function HomeScreen({ navigation }: Props) {
+  const insets = useSafeAreaInsets();
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [search, setSearch] = useState('');
@@ -183,9 +185,40 @@ export default function HomeScreen({ navigation }: Props) {
     const startedAt = Date.now();
 
     try {
-      const [prodRes, catRes] = await Promise.all([getProducts(), getCategories()]);
+      const [prodRes, catRes, settingsRes] = await Promise.all([
+        getProducts(),
+        getCategories(),
+        getSettings().catch(() => ({ data: null })),
+      ]);
       setProducts(prodRes.data);
       setCategories(catRes.data);
+
+      if (settingsRes && settingsRes.data) {
+        const data = settingsRes.data;
+        setSliderBanners([
+          {
+            title: data.sliderTitle1 || 'Upto 50% Off Today',
+            subtitle: data.sliderSubtitle1 || 'Get amazing discounts on all premium groceries & daily essentials',
+            badge: data.sliderBadge1 || 'BEST OFFER',
+            image: data.sliderImage1 || 'https://images.unsplash.com/photo-1506617498300-38435a0950e8?w=800&q=80',
+            backgroundColor: '#a21caf',
+          },
+          {
+            title: data.sliderTitle2 || 'Low Price Guaranteed',
+            subtitle: data.sliderSubtitle2 || 'Unbeatable prices on fresh vegetables, milk, bread & eggs',
+            badge: data.sliderBadge2 || 'LOWEST PRICE',
+            image: data.sliderImage2 || 'https://images.unsplash.com/photo-1588964895597-cfccd6e2dbf9?w=800&q=80',
+            backgroundColor: '#15803d',
+          },
+          {
+            title: data.sliderTitle3 || 'Mega Savings Week',
+            subtitle: data.sliderSubtitle3 || 'Save big on your monthly grocery list with super saver packs',
+            badge: data.sliderBadge3 || 'SUPER VALUE',
+            image: data.sliderImage3 || 'https://images.unsplash.com/photo-1607349913338-fca6f7fc42d0?w=800&q=80',
+            backgroundColor: '#ea580c',
+          },
+        ]);
+      }
 
       // Prefetch product images for instant loading
       if (prodRes.data && Array.isArray(prodRes.data)) {
@@ -282,7 +315,34 @@ export default function HomeScreen({ navigation }: Props) {
   }, [cart]);
 
   const [activePromoIndex, setActivePromoIndex] = useState(0);
-  const promoListRef = useRef<FlatList<typeof PROMO_ITEMS[number]> | null>(null);
+  const promoListRef = useRef<FlatList<any> | null>(null);
+  const [sliderBanners, setSliderBanners] = useState<any[]>([
+    {
+      title: 'Upto 50% Off Today',
+      subtitle: 'Get amazing discounts on all premium groceries & daily essentials',
+      badge: 'BEST OFFER',
+      image: 'https://images.unsplash.com/photo-1506617498300-38435a0950e8?w=800&q=80',
+      backgroundColor: '#a21caf',
+    },
+    {
+      title: 'Low Price Guaranteed',
+      subtitle: 'Unbeatable prices on fresh vegetables, milk, bread & eggs',
+      badge: 'LOWEST PRICE',
+      image: 'https://images.unsplash.com/photo-1588964895597-cfccd6e2dbf9?w=800&q=80',
+      backgroundColor: '#15803d',
+    },
+    {
+      title: 'Mega Savings Week',
+      subtitle: 'Save big on your monthly grocery list with super saver packs',
+      badge: 'SUPER VALUE',
+      image: 'https://images.unsplash.com/photo-1607349913338-fca6f7fc42d0?w=800&q=80',
+      backgroundColor: '#ea580c',
+    },
+  ]);
+
+
+
+  const promoItems = sliderBanners;
 
   // ═══════════════════════════════════════════
   //  ADVANCED SEARCH BAR ANIMATIONS
@@ -380,29 +440,24 @@ export default function HomeScreen({ navigation }: Props) {
   }, [searchScaleAnim, searchGlowAnim, searchGlowPulse]);
 
 
-  // \u2014 Promo banner auto-scroll \u2014
+  // — Promo banner auto-scroll —
   useEffect(() => {
     const interval = setInterval(() => {
       setActivePromoIndex((currentIndex) => {
-        const nextIndex = (currentIndex + 1) % PROMO_ITEMS.length;
-        promoListRef.current?.scrollToOffset({ offset: nextIndex * PROMO_WIDTH, animated: true });
+        const nextIndex = (currentIndex + 1) % promoItems.length;
+        promoListRef.current?.scrollToOffset({ offset: nextIndex * (PROMO_WIDTH + 16), animated: true });
         return nextIndex;
       });
     }, 4500);
     return () => clearInterval(interval);
-  }, []);
+  }, [promoItems]);
 
-  const renderPromoItem = useCallback(({ item }: { item: typeof PROMO_ITEMS[number] }) => (
+  const renderPromoItem = useCallback(({ item }: { item: any }) => (
     <View style={[styles.promoCard, { width: PROMO_WIDTH, backgroundColor: item.backgroundColor }]}> 
-      <PremiumImage source={{ uri: item.image }} style={styles.promoImg} />
-      <View style={styles.promoOverlay} />
-      <View style={styles.promoContent}>
-        <View style={styles.promoBadge}>
-          <Text style={styles.promoBadgeText}>{item.badge}</Text>
-        </View>
-        <Text style={styles.promoTitle}>{item.title}</Text>
-        <Text style={styles.promoSub}>{item.subtitle}</Text>
-      </View>
+      <PremiumImage
+        source={resolveMediaUrl(item.image) ? { uri: resolveMediaUrl(item.image)! } : null}
+        style={styles.promoImg}
+      />
     </View>
   ), []);
 
@@ -468,7 +523,7 @@ export default function HomeScreen({ navigation }: Props) {
         <View style={styles.promoWrapper}>
           <FlatList
             ref={promoListRef}
-            data={PROMO_ITEMS}
+            data={promoItems}
             horizontal
             pagingEnabled
             showsHorizontalScrollIndicator={false}
@@ -478,12 +533,13 @@ export default function HomeScreen({ navigation }: Props) {
             renderItem={renderPromoItem}
             keyExtractor={(_, index) => `promo-${index}`}
             onMomentumScrollEnd={(event) => {
-              const index = Math.round(event.nativeEvent.contentOffset.x / PROMO_WIDTH);
-              setActivePromoIndex(index);
+              const index = Math.round(event.nativeEvent.contentOffset.x / (PROMO_WIDTH + 16));
+              setActivePromoIndex(index % promoItems.length);
             }}
+            snapToInterval={PROMO_WIDTH + 16} // card width + margin
           />
           <View style={styles.promoDotContainer}>
-            {PROMO_ITEMS.map((_, index) => (
+            {promoItems.map((_, index) => (
               <View
                 key={index}
                 style={[styles.promoDot, index === activePromoIndex && styles.promoDotActive]}
@@ -495,24 +551,28 @@ export default function HomeScreen({ navigation }: Props) {
 
       {!search && (
         <View style={styles.categoryGridContainer}>
-          {uniqueCategories.map((cat) => (
-            <TouchableOpacity
-              key={cat._id}
-              style={styles.catGridItem}
-              activeOpacity={0.7}
-              onPress={() => navigation.navigate('CategoryProducts', { categoryName: cat.name })}
-            >
-              <View style={styles.catGridImgContainer}>
-                <PremiumImage
-                  source={resolveMediaUrl(cat.image) ? { uri: resolveMediaUrl(cat.image)! } : null}
-                  style={styles.catGridImg}
-                  categoryName={cat.name}
-                  fallbackEmoji={cat.icon}
-                />
-              </View>
-              <Text style={styles.catGridText} numberOfLines={2}>{tCategory(cat.name)}</Text>
-            </TouchableOpacity>
-          ))}
+          {uniqueCategories.map((cat, index) => {
+            const pastelColors = ['#e0f2fe', '#fef3c7', '#dcfce7', '#f3e8ff', '#fee2e2', '#e0e7ff', '#f0fdf4', '#faf5ff'];
+            const bgColor = pastelColors[index % pastelColors.length];
+            return (
+              <TouchableOpacity
+                key={cat._id}
+                style={styles.catGridItem}
+                activeOpacity={0.7}
+                onPress={() => navigation.navigate('CategoryProducts', { categoryName: cat.name })}
+              >
+                <View style={[styles.catGridImgContainer, { backgroundColor: bgColor }]}>
+                  <PremiumImage
+                    source={resolveMediaUrl(cat.image) ? { uri: resolveMediaUrl(cat.image)! } : null}
+                    style={cat.image ? styles.catGridImg : styles.catGridIconStyle}
+                    categoryName={cat.name}
+                    fallbackEmoji={cat.icon}
+                  />
+                </View>
+                <Text style={styles.catGridText} numberOfLines={2}>{tCategory(cat.name)}</Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
       )}
     </View>
@@ -542,7 +602,7 @@ export default function HomeScreen({ navigation }: Props) {
   return (
     <View style={styles.container}>
       {/* HEADER */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: Math.max(insets.top, 16) }]}>
         <View style={styles.headerTop}>
           <View style={styles.headerLeft}>
             <View style={styles.headerBrand}>
@@ -645,6 +705,10 @@ export default function HomeScreen({ navigation }: Props) {
                   <Ionicons name="close-circle" size={20} color="#7c3aed" />
                 </TouchableOpacity>
               </Animated.View>
+            )}
+
+            {!search && !searchFocused && (
+              <Ionicons name="mic-outline" size={20} color="#94a3b8" style={{ marginLeft: 8 }} />
             )}
           </View>
         </Animated.View>
@@ -750,7 +814,6 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8fafc' },
   header: {
     backgroundColor: '#7c3aed',
-    paddingTop: Platform.OS === 'ios' ? 40 : 32,
     paddingBottom: 12,
     paddingHorizontal: 16,
     borderBottomLeftRadius: 16,
@@ -947,6 +1010,33 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 15,
     paddingHorizontal: 2,
+  },
+  topTabsScroll: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#ffffff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  topTabButton: {
+    flexDirection: 'column',
+    alignItems: 'center',
+    marginRight: 20,
+    paddingVertical: 4,
+  },
+  topTabIcon: {
+    fontSize: 22,
+    marginBottom: 4,
+  },
+  topTabLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#475569',
+  },
+  catGridIconStyle: {
+    width: '50%',
+    height: '50%',
+    resizeMode: 'contain',
   },
 
   // ─── Category section (Blinkit-style) ────────────────────────────────────────
