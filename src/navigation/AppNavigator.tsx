@@ -76,9 +76,9 @@ function MainTabs() {
         tabBarStyle: {
           backgroundColor: '#ffffff',
           borderTopColor: '#f1f5f9',
-          paddingBottom: insets.bottom > 0 ? insets.bottom - 4 : 8,
+          paddingBottom: insets.bottom > 0 ? insets.bottom - 4 : 12,
           paddingTop: 6,
-          height: 54 + (insets.bottom > 0 ? insets.bottom - 4 : 8),
+          height: 54 + (insets.bottom > 0 ? insets.bottom - 4 : 12),
           shadowColor: '#0f172a',
           shadowOffset: { width: 0, height: -3 },
           shadowOpacity: 0.05,
