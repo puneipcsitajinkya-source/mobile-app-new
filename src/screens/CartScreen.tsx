@@ -195,7 +195,9 @@ export default function CartScreen({ navigation }: Props) {
               <Text style={styles.checkoutSub}>TOTAL</Text>
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={styles.checkoutBtnText}>Checkout</Text>
+              <Text style={styles.checkoutBtnText}>
+                {language === 'mr' ? 'ऑर्डर करण्यासाठी पुढे जा' : language === 'hi' ? 'ऑर्डर करने के लिए आगे बढ़ें' : 'Continue to order'}
+              </Text>
               <Ionicons name="chevron-forward" size={18} color="#ffffff" />
             </View>
           </TouchableOpacity>

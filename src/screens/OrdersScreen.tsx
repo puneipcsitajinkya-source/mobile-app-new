@@ -29,7 +29,7 @@ interface Order {
   deliveryFee: number;
   handlingFee: number;
   totalAmount: number;
-  status: 'pending' | 'confirmed' | 'out_for_delivery' | 'delivered' | 'closed';
+  status: 'pending' | 'confirmed' | 'out_for_delivery' | 'delivered' | 'closed' | 'cancelled';
   address?: string;
   createdAt: string;
 }
@@ -79,14 +79,14 @@ export default function OrdersScreen() {
           onPress: async () => {
             try {
               setLoading(true);
-              await updateOrderStatus(orderId, 'closed');
+              await updateOrderStatus(orderId, 'cancelled');
 
               // Update local state and AsyncStorage
               const savedOrdersStr = await AsyncStorage.getItem('@device_orders');
               if (savedOrdersStr) {
                 const existingOrders = JSON.parse(savedOrdersStr);
                 const updatedOrders = existingOrders.map((o: any) =>
-                  o._id === orderId ? { ...o, status: 'closed' } : o
+                  o._id === orderId ? { ...o, status: 'cancelled' } : o
                 );
                 await AsyncStorage.setItem('@device_orders', JSON.stringify(updatedOrders));
                 setOrders(updatedOrders);
@@ -95,10 +95,10 @@ export default function OrdersScreen() {
                 fetchOrders(false);
               }
 
-              Alert.alert(t('successTitle') || "Success", t('orderCancelledMsg') || "Order has been cancelled successfully.");
+              Alert.alert(t("Order has been cancelled successfully."));
             } catch (err) {
               console.error('Failed to cancel order:', err);
-              Alert.alert(t('errorTitle') || "Error", t('cancelFailedMsg') || "Failed to cancel order. Please try again.");
+              Alert.alert(t("Failed to cancel order. Please try again."));
             } finally {
               setLoading(false);
             }
@@ -187,6 +187,7 @@ export default function OrdersScreen() {
       case 'delivered':
         return { bg: '#f0fdf4', text: '#22c55e' }; // Green
       case 'closed':
+      case 'cancelled':
         return { bg: '#fef2f2', text: '#dc2626' }; // Red
       default:
         return { bg: '#f1f5f9', text: '#64748b' };
@@ -205,6 +206,8 @@ export default function OrdersScreen() {
         return 'Delivered';
       case 'closed':
         return 'Closed';
+      case 'cancelled':
+        return 'Cancelled';
       default:
         return status;
     }
@@ -255,12 +258,19 @@ export default function OrdersScreen() {
 
         {/* Tracking Timeline */}
         <View style={styles.timelineContainer}>
-          {['pending', 'confirmed', 'out_for_delivery', 'delivered', 'closed'].map((s, index) => {
-            const statuses = ['pending', 'confirmed', 'out_for_delivery', 'delivered', 'closed'];
-            const labels = ['Order Placed', 'Confirmed', 'Out for Delivery', 'Delivered', 'Closed'];
+          {(item.status === 'cancelled'
+            ? ['pending', 'confirmed', 'out_for_delivery', 'delivered', 'cancelled']
+            : ['pending', 'confirmed', 'out_for_delivery', 'delivered', 'closed']
+          ).map((s, index, arr) => {
+            const statuses = item.status === 'cancelled'
+              ? ['pending', 'confirmed', 'out_for_delivery', 'delivered', 'cancelled']
+              : ['pending', 'confirmed', 'out_for_delivery', 'delivered', 'closed'];
+            const labels = item.status === 'cancelled'
+              ? ['Order Placed', 'Confirmed', 'Out for Delivery', 'Delivered', 'Cancelled']
+              : ['Order Placed', 'Confirmed', 'Out for Delivery', 'Delivered', 'Closed'];
             const currentIndex = statuses.indexOf(item.status);
             const isActive = index <= currentIndex;
-            const isLast = index === statuses.length - 1;
+            const isLast = index === arr.length - 1;
 
             return (
               <View key={s} style={styles.timelineStep}>

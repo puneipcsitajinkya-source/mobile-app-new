@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
-  StyleSheet,
+  StyleSheet, Dimensions, FlatList, NativeSyntheticEvent, NativeScrollEvent
 } from 'react-native';
 import PremiumImage from '../components/PremiumImage';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -12,6 +12,7 @@ import { getSubcategory } from '../services/api';
 import { useCart } from '../hooks/useCart';
 import { useLanguage } from '../hooks/useLanguage';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'ProductDetail'>;
@@ -28,19 +29,31 @@ interface Product {
   unit?: string;
   brand?: string;
   image?: string;
+  images?: string[];
   category: string;
   subcategory?: string;
 }
 
+const { width: screenWidth } = Dimensions.get('window');
+
 export default function ProductDetailScreen({ route, navigation }: Props) {
   const { productId } = route.params;
   const [product, setProduct] = useState<Product | null>(null);
+  const [activeIndex, setActiveIndex] = useState(0);
   const [subcategoryName, setSubcategoryName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [qty, setQty] = useState(1);
   const [added, setAdded] = useState(false);
   const { addToCart, clearCart } = useCart();
   const { t, tProduct, tCategory } = useLanguage();
+  const insets = useSafeAreaInsets();
+  const topOffset = insets.top > 0 ? insets.top + 8 : 16;
+
+  const flatListRef = useRef<FlatList>(null);
+
+  const imagesList = product?.images && product.images.length > 0
+    ? product.images
+    : (product?.image ? [product.image] : []);
 
   useEffect(() => {
     let mounted = true;
@@ -49,6 +62,7 @@ export default function ProductDetailScreen({ route, navigation }: Props) {
         if (!mounted) return;
         const p = res.data as Product;
         setProduct(p);
+        setActiveIndex(0);
         if (p?.subcategory) {
           try {
             const subRes = await getSubcategory(p.subcategory);
@@ -63,10 +77,41 @@ export default function ProductDetailScreen({ route, navigation }: Props) {
     return () => { mounted = false; };
   }, [productId]);
 
+  useEffect(() => {
+    if (loading || !product || imagesList.length <= 1) return;
+
+    const timer = setInterval(() => {
+      setActiveIndex((prevIndex) => {
+        const nextIndex = (prevIndex + 1) % imagesList.length;
+        flatListRef.current?.scrollToOffset({
+          offset: nextIndex * screenWidth,
+          animated: true,
+        });
+        return nextIndex;
+      });
+    }, 3000);
+
+    return () => clearInterval(timer);
+  }, [imagesList, loading, product]);
+
+  const handleThumbnailPress = (index: number) => {
+    setActiveIndex(index);
+    flatListRef.current?.scrollToIndex({ index, animated: true });
+  };
+
+  const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const scrollPosition = event.nativeEvent.contentOffset.x;
+    const index = Math.round(scrollPosition / screenWidth);
+    if (index !== activeIndex && index >= 0 && index < imagesList.length) {
+      setActiveIndex(index);
+    }
+  };
+
   const handleAdd = () => {
     if (!product) return;
+    const currentImg = imagesList[activeIndex] || product.image;
     for (let i = 0; i < qty; i++) {
-      addToCart({ _id: product._id, name: product.name, price: product.price, image: product.image });
+      addToCart({ _id: product._id, name: product.name, price: product.price, image: currentImg });
     }
     setAdded(true);
     setTimeout(() => setAdded(false), 1500);
@@ -75,7 +120,8 @@ export default function ProductDetailScreen({ route, navigation }: Props) {
   const handleBuyNow = () => {
     if (!product) return;
     clearCart();
-    addToCart({ _id: product._id, name: product.name, price: product.price, image: product.image });
+    const currentImg = imagesList[activeIndex] || product.image;
+    addToCart({ _id: product._id, name: product.name, price: product.price, image: currentImg });
     navigation.navigate('Checkout');
   };
 
@@ -94,18 +140,90 @@ export default function ProductDetailScreen({ route, navigation }: Props) {
 
   return (
     <View style={styles.container}>
+      {/* Floating Header */}
+      <View style={[styles.floatingHeader, { top: topOffset }]}>
+        <TouchableOpacity
+          style={styles.headerButton}
+          onPress={() => navigation.goBack()}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="arrow-back" size={22} color="#0f172a" />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.headerButton}
+          onPress={() => navigation.navigate('HomeMain' as any)}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="home-outline" size={20} color="#0f172a" />
+        </TouchableOpacity>
+      </View>
+
       <ScrollView showsVerticalScrollIndicator={false}>
-        <PremiumImage
-          source={resolveMediaUrl(product.image) ? { uri: resolveMediaUrl(product.image)! } : null}
-          style={styles.image}
-          resizeMode="contain"
-          fallbackIcon="leaf-outline"
-          categoryName={product.category}
-        />
-        {(product.discount ?? 0) > 0 && (
-          <View style={styles.imageDiscountBadge}>
-            <Text style={styles.imageDiscountText}>{product.discount}% OFF</Text>
-          </View>
+        <View style={styles.sliderContainer}>
+          <FlatList
+            ref={flatListRef}
+            data={imagesList}
+            keyExtractor={(item, index) => `${item}_${index}`}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
+            renderItem={({ item }) => (
+              <PremiumImage
+                source={resolveMediaUrl(item) ? { uri: resolveMediaUrl(item)! } : null}
+                style={{ width: screenWidth, height: 280 }}
+                resizeMode="contain"
+                fallbackIcon="leaf-outline"
+                categoryName={product.category}
+              />
+            )}
+          />
+          {imagesList.length > 1 && (
+            <View style={styles.dotsContainer}>
+              {imagesList.map((_, idx) => (
+                <View
+                  key={idx}
+                  style={[
+                    styles.dot,
+                    activeIndex === idx ? styles.activeDot : null
+                  ]}
+                />
+              ))}
+            </View>
+          )}
+          {(product.discount ?? 0) > 0 && (
+            <View style={styles.imageDiscountBadge}>
+              <Text style={styles.imageDiscountText}>{product.discount}% OFF</Text>
+            </View>
+          )}
+        </View>
+
+        {imagesList.length > 1 && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.thumbnailContainer}
+          >
+            {imagesList.map((imgUrl, idx) => (
+              <TouchableOpacity
+                key={idx}
+                style={[
+                  styles.thumbnailWrapper,
+                  activeIndex === idx && styles.thumbnailWrapperActive
+                ]}
+                onPress={() => handleThumbnailPress(idx)}
+              >
+                <PremiumImage
+                  source={resolveMediaUrl(imgUrl) ? { uri: resolveMediaUrl(imgUrl)! } : null}
+                  style={styles.thumbnailImage}
+                  resizeMode="cover"
+                  fallbackIcon="image-outline"
+                />
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
         )}
         <View style={styles.content}>
           <View style={styles.badgeRow}>
@@ -119,14 +237,13 @@ export default function ProductDetailScreen({ route, navigation }: Props) {
                 <Text style={styles.subcategoryBadgeText}>{subcategoryName}</Text>
               </View>
             )}
-            <View style={styles.ratingBadge}>
-              <Ionicons name="star" size={12} color="#fbbf24" />
-              <Text style={styles.ratingText}>4.8 (80+ ratings)</Text>
+            <View >
+
             </View>
           </View>
           <Text style={styles.name}>{tProduct(product.name)}</Text>
           <Text style={styles.unitText}>{product.unit || '1 pc'}</Text>
-          
+
           <View style={styles.priceContainer}>
             <Text style={styles.price}>₹{product.price}</Text>
             {product.mrp != null && product.mrp > product.price && (
@@ -234,8 +351,37 @@ const styles = StyleSheet.create({
   priceContainer: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
   price: { fontSize: 24, fontWeight: '800', color: '#0f172a' },
   mrpText: { fontSize: 14, color: '#94a3b8', textDecorationLine: 'line-through', fontWeight: '500', marginTop: 4 },
-  imageDiscountBadge: { position: 'absolute', top: 20, right: 20, backgroundColor: '#3b82f6', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
-  imageDiscountText: { color: '#ffffff', fontWeight: '800', fontSize: 14 },
+  imageDiscountBadge: {
+    position: 'absolute',
+    bottom: 12,
+    left: 12,
+    backgroundColor: '#7c3aed',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  imageDiscountText: { color: '#ffffff', fontWeight: '800', fontSize: 12 },
+  floatingHeader: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    zIndex: 100,
+  },
+  headerButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 5,
+  },
   deliveryBox: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#f8fafc', padding: 12, borderRadius: 12, marginVertical: 12, borderWidth: 1, borderColor: '#e2e8f0' },
   deliveryText: { fontSize: 13, fontWeight: '700', color: '#475569' },
   descContainer: { marginTop: 12 },
@@ -269,4 +415,55 @@ const styles = StyleSheet.create({
   buyBtn: { flex: 1.2, backgroundColor: '#a855f7', borderRadius: 14, paddingVertical: 16, alignItems: 'center', justifyContent: 'center' },
   buyBtnText: { color: '#ffffff', fontSize: 16, fontWeight: '800' },
   errorText: { color: '#94a3b8', textAlign: 'center', marginTop: 40 },
+  thumbnailContainer: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    gap: 10,
+    backgroundColor: '#ffffff',
+  },
+  thumbnailWrapper: {
+    width: 60,
+    height: 60,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: '#e2e8f0',
+    overflow: 'hidden',
+    backgroundColor: '#ffffff',
+  },
+  thumbnailWrapperActive: {
+    borderColor: '#a855f7',
+  },
+  thumbnailImage: {
+    width: '100%',
+    height: '100%',
+  },
+  sliderContainer: {
+    width: '100%',
+    height: 280,
+    position: 'relative',
+    backgroundColor: '#ffffff',
+  },
+  dotsContainer: {
+    position: 'absolute',
+    bottom: 12,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 6,
+  },
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(0, 0, 0, 0.2)',
+  },
+  activeDot: {
+    width: 14,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#a855f7',
+  },
 });

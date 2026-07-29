@@ -295,13 +295,13 @@ export default function CheckoutScreen({ navigation }: Props) {
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
 
       {hasAnyDetail && (
-        <TouchableOpacity 
-          style={styles.topClearBtn} 
+        <TouchableOpacity
+          style={styles.topClearBtn}
           onPress={handleNewAddress}
           activeOpacity={0.85}
         >
           <Ionicons name="trash-outline" size={15} color="#a855f7" />
-          <Text style={styles.topClearBtnText}>Clear all detail</Text>
+          <Text style={styles.topClearBtnText}>Clear All Details For New Address</Text>
         </TouchableOpacity>
       )}
 

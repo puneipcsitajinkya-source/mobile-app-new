@@ -1,7 +1,8 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity,
-  StyleSheet, RefreshControl, Dimensions, Image
+  StyleSheet, RefreshControl, Dimensions, Image,
+  ScrollView, NativeSyntheticEvent, NativeScrollEvent
 } from 'react-native';
 import PremiumImage from '../components/PremiumImage';
 import StickyCart from '../components/StickyCart';
@@ -29,6 +30,7 @@ interface Product {
   discount?: number;
   unit?: string;
   image?: string;
+  images?: string[];
   category: string;
   // now storing subcategory as an id string (ObjectId)
   subcategory?: string;
@@ -63,6 +65,29 @@ const ProductCard = React.memo(function ProductCard({
   const hasDiscount = (item.discount ?? 0) > 0;
   const hasMrp = item.mrp != null && item.mrp > item.price;
 
+  const [activeIdx, setActiveIdx] = useState(0);
+  const scrollViewRef = useRef<ScrollView>(null);
+
+  useEffect(() => {
+    if (!item.images || item.images.length <= 1) return;
+    const interval = setInterval(() => {
+      setActiveIdx((prev) => {
+        const next = (prev + 1) % item.images!.length;
+        scrollViewRef.current?.scrollTo({ x: next * cardWidth, animated: true });
+        return next;
+      });
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [item.images, cardWidth]);
+
+  const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const scrollPosition = event.nativeEvent.contentOffset.x;
+    const index = Math.round(scrollPosition / cardWidth);
+    if (index !== activeIdx && index >= 0 && index < (item.images?.length || 0)) {
+      setActiveIdx(index);
+    }
+  };
+
   const specTags = React.useMemo(() => {
     if (!item.description) return [];
     const parts = item.description.split(/[,;\n]/).map(p => p.trim()).filter(p => p.length > 0 && p.length < 24);
@@ -78,17 +103,53 @@ const ProductCard = React.memo(function ProductCard({
   }, [item._id]);
 
   return (
-    <TouchableOpacity style={[styles.card, { width: cardWidth }]} onPress={() => onPress(item._id)} activeOpacity={0.93}>
+    <View style={[styles.card, { width: cardWidth }]}>
 
       {/* ── Image section (white bg) ── */}
       <View style={styles.cardImgContainer}>
-        <PremiumImage
-          source={resolveMediaUrl(item.image) ? { uri: resolveMediaUrl(item.image)! } : null}
-          style={styles.cardImg}
-          resizeMode="contain"
-          fallbackIcon="leaf-outline"
-          categoryName={item.category}
-        />
+        {item.images && item.images.length > 1 ? (
+          <ScrollView
+            ref={scrollViewRef}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            nestedScrollEnabled={true}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
+            style={{ width: '100%', height: '100%' }}
+          >
+            {item.images.map((imgUrl, idx) => (
+              <TouchableOpacity
+                key={idx}
+                activeOpacity={0.93}
+                onPress={() => onPress(item._id)}
+                style={{ width: cardWidth, height: 120, alignItems: 'center', justifyContent: 'center', paddingTop: 12 }}
+              >
+                <PremiumImage
+                  source={resolveMediaUrl(imgUrl) ? { uri: resolveMediaUrl(imgUrl)! } : null}
+                  style={styles.cardImg}
+                  resizeMode="contain"
+                  fallbackIcon="leaf-outline"
+                  categoryName={item.category}
+                />
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        ) : (
+          <TouchableOpacity
+            activeOpacity={0.93}
+            onPress={() => onPress(item._id)}
+            style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', paddingTop: 12 }}
+          >
+            <PremiumImage
+              source={resolveMediaUrl(item.image) ? { uri: resolveMediaUrl(item.image)! } : null}
+              style={styles.cardImg}
+              resizeMode="contain"
+              fallbackIcon="leaf-outline"
+              categoryName={item.category}
+            />
+          </TouchableOpacity>
+        )}
 
         {/* Favorite (heart) icon */}
         <TouchableOpacity style={styles.favIconBox} activeOpacity={0.75}>
@@ -96,11 +157,19 @@ const ProductCard = React.memo(function ProductCard({
         </TouchableOpacity>
 
         {/* Carousel indicator dots */}
-        <View style={styles.carouselDots}>
-          <View style={[styles.carouselDot, styles.carouselDotActive]} />
-          <View style={styles.carouselDot} />
-          <View style={styles.carouselDot} />
-        </View>
+        {item.images && item.images.length > 1 && (
+          <View style={styles.carouselDots}>
+            {item.images.map((_, idx) => (
+              <View
+                key={idx}
+                style={[
+                  styles.carouselDot,
+                  activeIdx === idx ? styles.carouselDotActive : null
+                ]}
+              />
+            ))}
+          </View>
+        )}
 
         {/* Discount badge — top left */}
         {hasDiscount && (
@@ -113,39 +182,41 @@ const ProductCard = React.memo(function ProductCard({
       {/* ── Content below image ── */}
       <View style={styles.cardContent}>
         
-        {/* Delivery Row */}
-        <View style={styles.deliveryRow}>
-          <Ionicons name="time" size={11} color="#64748b" style={{ marginRight: 2 }} />
-          <Text style={styles.deliveryText}>8 mins</Text>
-        </View>
-
-        {/* Name */}
-        <Text style={styles.cardName} numberOfLines={2}>{tProduct(item.name)}</Text>
-
-        {/* Spec Tags */}
-        <View style={styles.specTagsContainer}>
-          {specTags.length > 0 ? (
-            specTags.map((tag, idx) => (
-              <View key={idx} style={styles.specTag}>
-                <Text style={styles.specTagText} numberOfLines={1}>{tag}</Text>
-              </View>
-            ))
-          ) : (
-            <View style={styles.specTag}>
-              <Text style={styles.specTagText}>Premium Quality</Text>
-            </View>
-          )}
-        </View>
-
-        {/* Rating Row */}
-        <View style={styles.ratingRow}>
-          <View style={styles.stars}>
-            {Array.from({ length: 5 }).map((_, i) => (
-              <Ionicons key={i} name="star" size={10} color={i < 4 ? '#fbbf24' : '#cbd5e1'} />
-            ))}
+        <TouchableOpacity onPress={() => onPress(item._id)} activeOpacity={0.93}>
+          {/* Delivery Row */}
+          <View style={styles.deliveryRow}>
+            <Ionicons name="time" size={11} color="#64748b" style={{ marginRight: 2 }} />
+            <Text style={styles.deliveryText}>8 mins</Text>
           </View>
-          <Text style={styles.ratingCount}>{reviewCount.toLocaleString()}</Text>
-        </View>
+
+          {/* Name */}
+          <Text style={styles.cardName} numberOfLines={2}>{tProduct(item.name)}</Text>
+
+          {/* Spec Tags */}
+          <View style={styles.specTagsContainer}>
+            {specTags.length > 0 ? (
+              specTags.map((tag, idx) => (
+                <View key={idx} style={styles.specTag}>
+                  <Text style={styles.specTagText} numberOfLines={1}>{tag}</Text>
+                </View>
+              ))
+            ) : (
+              <View style={styles.specTag}>
+                <Text style={styles.specTagText}>Premium Quality</Text>
+              </View>
+            )}
+          </View>
+
+          {/* Rating Row */}
+          <View style={styles.ratingRow}>
+            <View style={styles.stars}>
+              {Array.from({ length: 5 }).map((_, i) => (
+                <Ionicons key={i} name="star" size={10} color={i < 4 ? '#fbbf24' : '#cbd5e1'} />
+              ))}
+            </View>
+            <Text style={styles.ratingCount}>{reviewCount.toLocaleString()}</Text>
+          </View>
+        </TouchableOpacity>
 
         {/* Unit and Action Row */}
         <View style={styles.actionRow}>
@@ -178,7 +249,7 @@ const ProductCard = React.memo(function ProductCard({
           )}
         </View>
       </View>
-    </TouchableOpacity>
+    </View>
   );
 });
 

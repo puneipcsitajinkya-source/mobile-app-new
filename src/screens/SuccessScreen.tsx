@@ -50,7 +50,7 @@ export default function SuccessScreen({ navigation, route }: Props) {
           onPress: async () => {
             setCancelling(true);
             try {
-              await updateOrderStatus(orderId, 'closed');
+              await updateOrderStatus(orderId, 'cancelled');
               setCancelled(true);
 
               // Update local orders list cache in AsyncStorage
@@ -58,15 +58,15 @@ export default function SuccessScreen({ navigation, route }: Props) {
               if (savedOrdersStr) {
                 const existingOrders = JSON.parse(savedOrdersStr);
                 const updatedOrders = existingOrders.map((o: any) =>
-                  o._id === orderId ? { ...o, status: 'closed' } : o
+                  o._id === orderId ? { ...o, status: 'cancelled' } : o
                 );
                 await AsyncStorage.setItem('@device_orders', JSON.stringify(updatedOrders));
               }
 
-              Alert.alert(t('successTitle') || "Success", t('orderCancelledMsg') || "Order has been cancelled successfully.");
+              Alert.alert(t("Order has been cancelled successfully."));
             } catch (err) {
               console.error('Failed to cancel order:', err);
-              Alert.alert(t('errorTitle') || "Error", t('cancelFailedMsg') || "Failed to cancel order. Please try again.");
+              Alert.alert(t("Failed to cancel order. Please try again."));
             } finally {
               setCancelling(false);
             }
@@ -94,10 +94,10 @@ export default function SuccessScreen({ navigation, route }: Props) {
 
       <Animated.View style={{ opacity: fadeAnim, alignItems: 'center' }}>
         <Text style={styles.title}>
-          {cancelled ? (t('orderCancelledTitle') || "Order Cancelled") : t('orderPlaced')}
+          {cancelled ? t("Order Cancelled") : t('orderPlaced')}
         </Text>
         <Text style={styles.subtitle}>
-          {cancelled ? (t('orderCancelledSub') || "Your order has been cancelled successfully.") : t('orderPlacedSub')}
+          {cancelled ? ("Your order has been cancelled successfully.") : t('orderPlacedSub')}
         </Text>
 
         <View style={styles.orderIdBox}>

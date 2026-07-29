@@ -2,7 +2,8 @@ import React, { useEffect, useState, useCallback, useMemo, useRef, memo } from '
 import {
   View, Text, FlatList, TextInput, TouchableOpacity,
   StyleSheet, RefreshControl, Dimensions,
-  Animated, Easing, Platform, Modal, Image
+  Animated, Easing, Platform, Modal, Image,
+  ScrollView, NativeSyntheticEvent, NativeScrollEvent
 } from 'react-native';
 import PremiumImage from '../components/PremiumImage';
 import * as SplashScreen from 'expo-splash-screen';
@@ -35,6 +36,7 @@ interface Product {
   discount?: number;
   unit?: string;
   image?: string;
+  images?: string[];
   category: string;
 }
 
@@ -109,20 +111,93 @@ const ProductCard = memo(function ProductCard({
     ? Math.round(((item.mrp! - item.price) / item.mrp!) * 100)
     : (item.discount ?? 0);
 
+  const [activeIdx, setActiveIdx] = useState(0);
+  const cardWidth = compact ? 148 : 160;
+  const scrollViewRef = useRef<ScrollView>(null);
+
+  useEffect(() => {
+    if (!item.images || item.images.length <= 1) return;
+    const interval = setInterval(() => {
+      setActiveIdx((prev) => {
+        const next = (prev + 1) % item.images!.length;
+        scrollViewRef.current?.scrollTo({ x: next * cardWidth, animated: true });
+        return next;
+      });
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [item.images, cardWidth]);
+
+  const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const scrollPosition = event.nativeEvent.contentOffset.x;
+    const index = Math.round(scrollPosition / cardWidth);
+    if (index !== activeIdx && index >= 0 && index < (item.images?.length || 0)) {
+      setActiveIdx(index);
+    }
+  };
+
   return (
-    <TouchableOpacity
+    <View
       style={compact ? styles.blinkCard : styles.blinkCardWide}
-      onPress={() => onPress(item._id)}
-      activeOpacity={0.9}
     >
       {/* Image area */}
       <View style={compact ? styles.blinkImgBox : styles.blinkImgBoxWide}>
-        <PremiumImage
-          source={resolveMediaUrl(item.image) ? { uri: resolveMediaUrl(item.image)! } : null}
-          style={styles.blinkImg}
-          fallbackIcon="leaf-outline"
-          categoryName={item.category}
-        />
+        {item.images && item.images.length > 1 ? (
+          <ScrollView
+            ref={scrollViewRef}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            nestedScrollEnabled={true}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
+            style={{ width: '100%', height: '100%' }}
+          >
+            {item.images.map((imgUrl, idx) => (
+              <TouchableOpacity
+                key={idx}
+                activeOpacity={0.9}
+                onPress={() => onPress(item._id)}
+                style={{ width: cardWidth, height: compact ? 130 : 150, alignItems: 'center', justifyContent: 'center', paddingTop: 8 }}
+              >
+                <PremiumImage
+                  source={resolveMediaUrl(imgUrl) ? { uri: resolveMediaUrl(imgUrl)! } : null}
+                  style={styles.blinkImg}
+                  fallbackIcon="leaf-outline"
+                  categoryName={item.category}
+                />
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        ) : (
+          <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={() => onPress(item._id)}
+            style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' }}
+          >
+            <PremiumImage
+              source={resolveMediaUrl(item.image) ? { uri: resolveMediaUrl(item.image)! } : null}
+              style={styles.blinkImg}
+              fallbackIcon="leaf-outline"
+              categoryName={item.category}
+            />
+          </TouchableOpacity>
+        )}
+
+        {/* Carousel indicator dots */}
+        {item.images && item.images.length > 1 && (
+          <View style={styles.cardDotsContainer}>
+            {item.images.map((_, idx) => (
+              <View
+                key={idx}
+                style={[
+                  styles.cardDot,
+                  activeIdx === idx ? styles.cardActiveDot : null
+                ]}
+              />
+            ))}
+          </View>
+        )}
+
         {discountPct > 0 && (
           <View style={styles.blinkDiscBadge}>
             <Text style={styles.blinkDiscText}>{discountPct}%{`\n`}OFF</Text>
@@ -150,21 +225,23 @@ const ProductCard = memo(function ProductCard({
 
       {/* Info area */}
       <View style={styles.blinkInfo}>
-        <Text style={styles.blinkUnit} numberOfLines={1}>{item.unit || '1 pc'}</Text>
-        <Text style={compact ? styles.blinkName : styles.blinkNameWide} numberOfLines={2}>{productLabel}</Text>
-        {hasDiscount && (
-          <Text style={styles.blinkSaving} numberOfLines={1}>
-            {discountPct}% OFF on MRP
-          </Text>
-        )}
-        <View style={styles.blinkPriceRow}>
-          <Text style={styles.blinkPrice}>₹{item.price}</Text>
+        <TouchableOpacity onPress={() => onPress(item._id)} activeOpacity={0.9}>
+          <Text style={styles.blinkUnit} numberOfLines={1}>{item.unit || '1 pc'}</Text>
+          <Text style={compact ? styles.blinkName : styles.blinkNameWide} numberOfLines={2}>{productLabel}</Text>
           {hasDiscount && (
-            <Text style={styles.blinkMrp}>₹{item.mrp}</Text>
+            <Text style={styles.blinkSaving} numberOfLines={1}>
+              {discountPct}% OFF on MRP
+            </Text>
           )}
-        </View>
+          <View style={styles.blinkPriceRow}>
+            <Text style={styles.blinkPrice}>₹{item.price}</Text>
+            {hasDiscount && (
+              <Text style={styles.blinkMrp}>₹{item.mrp}</Text>
+            )}
+          </View>
+        </TouchableOpacity>
       </View>
-    </TouchableOpacity>
+    </View>
   );
 });
 
@@ -1320,6 +1397,28 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontSize: 14,
     color: '#64748b',
+  },
+  cardDotsContainer: {
+    position: 'absolute',
+    bottom: 6,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 4,
+  },
+  cardDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(0, 0, 0, 0.15)',
+  },
+  cardActiveDot: {
+    width: 8,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#a855f7',
   },
 });
 
