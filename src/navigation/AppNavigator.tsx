@@ -76,9 +76,9 @@ function MainTabs() {
         tabBarStyle: {
           backgroundColor: '#ffffff',
           borderTopColor: '#f1f5f9',
-          paddingBottom: insets.bottom > 0 ? insets.bottom - 4 : 12,
+          paddingBottom: insets.bottom > 0 ? insets.bottom : 6,
           paddingTop: 6,
-          height: 54 + (insets.bottom > 0 ? insets.bottom - 4 : 12),
+          height: 60 + (insets.bottom > 0 ? insets.bottom : 6),
           shadowColor: '#0f172a',
           shadowOffset: { width: 0, height: -3 },
           shadowOpacity: 0.05,
@@ -87,7 +87,13 @@ function MainTabs() {
         },
         tabBarActiveTintColor: '#4b5563',
         tabBarInactiveTintColor: '#4b5563',
-        tabBarLabelStyle: { fontSize: 10, fontWeight: '600', marginTop: 2 },
+        tabBarLabelStyle: {
+          fontSize: 10,
+          fontWeight: '600',
+          marginTop: 2,
+          includeFontPadding: false,
+        },
+        tabBarAllowFontScaling: false,
       }}
     >
       <Tab.Screen
