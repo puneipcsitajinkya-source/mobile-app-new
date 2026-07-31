@@ -3,7 +3,8 @@ import {
   View, Text, FlatList, TextInput, TouchableOpacity,
   StyleSheet, RefreshControl, Dimensions,
   Animated, Easing, Platform, Modal, Image,
-  ScrollView, NativeSyntheticEvent, NativeScrollEvent
+  ScrollView, NativeSyntheticEvent, NativeScrollEvent,
+  Linking
 } from 'react-native';
 import PremiumImage from '../components/PremiumImage';
 import * as SplashScreen from 'expo-splash-screen';
@@ -45,6 +46,7 @@ interface Category {
   name: string;
   icon: string;
   image?: string;
+  images?: string[];
 }
 
 const { width } = Dimensions.get('window');
@@ -272,29 +274,33 @@ export default function HomeScreen({ navigation }: Props) {
 
       if (settingsRes && settingsRes.data) {
         const data = settingsRes.data;
-        setSliderBanners([
-          {
-            title: data.sliderTitle1 || 'Upto 50% Off Today',
-            subtitle: data.sliderSubtitle1 || 'Get amazing discounts on all premium groceries & daily essentials',
-            badge: data.sliderBadge1 || 'BEST OFFER',
-            image: data.sliderImage1 || 'https://images.unsplash.com/photo-1506617498300-38435a0950e8?w=800&q=80',
-            backgroundColor: '#a21caf',
-          },
-          {
-            title: data.sliderTitle2 || 'Low Price Guaranteed',
-            subtitle: data.sliderSubtitle2 || 'Unbeatable prices on fresh vegetables, milk, bread & eggs',
-            badge: data.sliderBadge2 || 'LOWEST PRICE',
-            image: data.sliderImage2 || 'https://images.unsplash.com/photo-1588964895597-cfccd6e2dbf9?w=800&q=80',
-            backgroundColor: '#15803d',
-          },
-          {
-            title: data.sliderTitle3 || 'Mega Savings Week',
-            subtitle: data.sliderSubtitle3 || 'Save big on your monthly grocery list with super saver packs',
-            badge: data.sliderBadge3 || 'SUPER VALUE',
-            image: data.sliderImage3 || 'https://images.unsplash.com/photo-1607349913338-fca6f7fc42d0?w=800&q=80',
-            backgroundColor: '#ea580c',
-          },
-        ]);
+        if (data.banners && data.banners.length > 0) {
+          setSliderBanners(data.banners);
+        } else {
+          setSliderBanners([
+            {
+              title: data.sliderTitle1 || 'Upto 50% Off Today',
+              subtitle: data.sliderSubtitle1 || 'Get amazing discounts on all premium groceries & daily essentials',
+              badge: data.sliderBadge1 || 'BEST OFFER',
+              image: data.sliderImage1 || 'https://images.unsplash.com/photo-1506617498300-38435a0950e8?w=800&q=80',
+              backgroundColor: '#a21caf',
+            },
+            {
+              title: data.sliderTitle2 || 'Low Price Guaranteed',
+              subtitle: data.sliderSubtitle2 || 'Unbeatable prices on fresh vegetables, milk, bread & eggs',
+              badge: data.sliderBadge2 || 'LOWEST PRICE',
+              image: data.sliderImage2 || 'https://images.unsplash.com/photo-1588964895597-cfccd6e2dbf9?w=800&q=80',
+              backgroundColor: '#15803d',
+            },
+            {
+              title: data.sliderTitle3 || 'Mega Savings Week',
+              subtitle: data.sliderSubtitle3 || 'Save big on your monthly grocery list with super saver packs',
+              badge: data.sliderBadge3 || 'SUPER VALUE',
+              image: data.sliderImage3 || 'https://images.unsplash.com/photo-1607349913338-fca6f7fc42d0?w=800&q=80',
+              backgroundColor: '#ea580c',
+            },
+          ]);
+        }
       }
 
       // Prefetch product images for instant loading
@@ -382,6 +388,39 @@ export default function HomeScreen({ navigation }: Props) {
   const handleProductPress = useCallback((productId: string) => {
     navigation.navigate('ProductDetail', { productId });
   }, [navigation]);
+
+  const handleBannerPress = useCallback((item: any) => {
+    if (!item.link) return;
+    const targetLink = item.link.trim();
+    if (!targetLink) return;
+
+    // 1. Check if it's a direct web URL
+    if (targetLink.startsWith('http://') || targetLink.startsWith('https://')) {
+      Linking.openURL(targetLink).catch(err => console.error('Failed to open banner link:', err));
+      return;
+    }
+
+    // 2. Check if it matches a category name (case insensitive, localized or English)
+    const matchedCategory = categories.find(c => {
+      return c.name.toLowerCase() === targetLink.toLowerCase() || tCategory(c.name).toLowerCase() === targetLink.toLowerCase();
+    });
+    if (matchedCategory) {
+      navigation.navigate('CategoryProducts', { categoryName: matchedCategory.name as any });
+      return;
+    }
+
+    // 3. Check if it matches a product ID or product name (case insensitive, localized or English)
+    const matchedProduct = products.find(p => {
+      const prodName = typeof p.name === 'string' ? p.name : ((p.name as any)?.en || '');
+      return p._id === targetLink || prodName.toLowerCase() === targetLink.toLowerCase() || tProduct(p.name).toLowerCase() === targetLink.toLowerCase();
+    });
+    if (matchedProduct) {
+      navigation.navigate('ProductDetail', { productId: matchedProduct._id });
+      return;
+    }
+
+    console.log('No matching route or action for banner link:', targetLink);
+  }, [categories, products, navigation, tCategory, tProduct]);
 
   const qtyMap = useMemo(() => {
     const map: Record<string, number> = {};
@@ -530,13 +569,17 @@ export default function HomeScreen({ navigation }: Props) {
   }, [promoItems]);
 
   const renderPromoItem = useCallback(({ item }: { item: any }) => (
-    <View style={[styles.promoCard, { width: PROMO_WIDTH, backgroundColor: item.backgroundColor }]}> 
+    <TouchableOpacity
+      activeOpacity={0.9}
+      onPress={() => handleBannerPress(item)}
+      style={[styles.promoCard, { width: PROMO_WIDTH, backgroundColor: item.backgroundColor || '#a21caf' }]}
+    > 
       <PremiumImage
         source={resolveMediaUrl(item.image) ? { uri: resolveMediaUrl(item.image)! } : null}
         style={styles.promoImg}
       />
-    </View>
-  ), []);
+    </TouchableOpacity>
+  ), [handleBannerPress]);
 
 
 
@@ -629,7 +672,7 @@ export default function HomeScreen({ navigation }: Props) {
       {!search && (
         <View style={styles.categoryGridContainer}>
           {uniqueCategories.map((cat, index) => {
-            const pastelColors = ['#e0f2fe', '#fef3c7', '#dcfce7', '#f3e8ff', '#fee2e2', '#e0e7ff', '#f0fdf4', '#faf5ff'];
+            const pastelColors = ['#f5f3ff', '#ede9fe', '#f3e8ff', '#fae8ff', '#f5f3ff', '#ede9fe', '#fae8ff', '#f3e8ff'];
             const bgColor = pastelColors[index % pastelColors.length];
             return (
               <TouchableOpacity
@@ -638,9 +681,10 @@ export default function HomeScreen({ navigation }: Props) {
                 activeOpacity={0.7}
                 onPress={() => navigation.navigate('CategoryProducts', { categoryName: cat.name })}
               >
-                <View style={[styles.catGridImgContainer, { backgroundColor: bgColor }]}>
+                <View style={styles.catGridImgContainer}>
                   <PremiumImage
                     source={resolveMediaUrl(cat.image) ? { uri: resolveMediaUrl(cat.image)! } : null}
+                    sources={cat.images ? cat.images.map((img: string) => resolveMediaUrl(img) ? { uri: resolveMediaUrl(img)! } : null).filter((x: any) => x !== null) as any[] : []}
                     style={cat.image ? styles.catGridImg : styles.catGridIconStyle}
                     categoryName={cat.name}
                     fallbackEmoji={cat.icon}
@@ -653,7 +697,7 @@ export default function HomeScreen({ navigation }: Props) {
         </View>
       )}
     </View>
-  ), [search, uniqueCategories, navigation, tCategory]);
+  ), [search, uniqueCategories, navigation, tCategory, promoItems, activePromoIndex]);
 
   const emptyStateComponent = useMemo(() => (
     <View style={styles.emptyState}>
@@ -1068,15 +1112,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 3,
   },
   catGridImgContainer: {
-    width: (width - 20) / 4 - 6,
-    height: (width - 20) / 4 - 6,
-    borderRadius: 14,
-    backgroundColor: '#ede9fe',
+    width: (width - 20) / 4 - 16,
+    height: (width - 20) / 4 - 10,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
     marginBottom: 6,
-    // No padding — images fill the full square for uniform ratio
   },
   catGridImg: { width: '100%', height: '100%', resizeMode: 'cover' },
   catGridIcon: { fontSize: 36 },

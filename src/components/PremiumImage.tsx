@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Animated, ImageProps, ImageSourcePropType, Image } from 'react-native';
+import { View, StyleSheet, Animated, ImageProps, ImageSourcePropType, Image, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 const FALLBACK_IMAGE = require('../../assets/general-img-landscape.png');
 
 interface PremiumImageProps extends Omit<ImageProps, 'source'> {
   source?: ImageSourcePropType | null | undefined;
+  sources?: ImageSourcePropType[] | null | undefined;
+  autoplayInterval?: number;
   fallbackIcon?: keyof typeof Ionicons.glyphMap;
   categoryName?: string; // Kept for API compatibility with existing screens
   fallbackEmoji?: string; // Kept for API compatibility with existing screens
@@ -13,6 +15,8 @@ interface PremiumImageProps extends Omit<ImageProps, 'source'> {
 
 export default function PremiumImage({
   source,
+  sources,
+  autoplayInterval = 2500,
   style,
   resizeMode = 'cover',
   fallbackIcon = 'leaf-outline',
@@ -24,28 +28,70 @@ export default function PremiumImage({
   onLoadEnd,
   ...props
 }: PremiumImageProps) {
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const [containerHeight, setContainerHeight] = useState(0);
+  const scrollViewRef = useRef<ScrollView | null>(null);
+  const isInitialLoad = useRef(true);
+
+  const sourcesKey = React.useMemo(() => {
+    if (!sources) return '';
+    return sources
+      .map((s: any) => {
+        if (!s) return '';
+        if (typeof s === 'number') return `local_${s}`;
+        if (typeof s === 'object' && 'uri' in s) return s.uri || '';
+        return '';
+      })
+      .join(',');
+  }, [sources]);
+
+  const handleLayout = (event: any) => {
+    const { width: w, height: h } = event.nativeEvent.layout;
+    if (w > 0) setContainerWidth(w);
+    if (h > 0) setContainerHeight(h);
+  };
+
+  // If the parent changes the sources/source prop, reset state and scroll to start
+  useEffect(() => {
+    setCurrentIndex(0);
+    isInitialLoad.current = true;
+    try {
+      scrollViewRef.current?.scrollTo({ x: 0, animated: false });
+    } catch (err) {
+      console.log('Reset scroll failed:', err);
+    }
+  }, [source, sourcesKey]);
+
+  const activeSource = React.useMemo(() => {
+    if (sources && sources.length > 0) {
+      return sources[currentIndex];
+    }
+    return source;
+  }, [source, sources, currentIndex]);
+
   const sourceKey = React.useMemo(() => {
-    if (!source) return '';
-    if (typeof source === 'number') return `local_${source}`;
-    if (Array.isArray(source)) return source.map(s => s.uri || '').join(',');
-    if (typeof source === 'object' && 'uri' in source) {
-      return source.uri || '';
+    if (!activeSource) return '';
+    if (typeof activeSource === 'number') return `local_${activeSource}`;
+    if (Array.isArray(activeSource)) return activeSource.map(s => s.uri || '').join(',');
+    if (typeof activeSource === 'object' && 'uri' in activeSource) {
+      return activeSource.uri || '';
     }
     return '';
-  }, [source]);
+  }, [activeSource]);
 
   // Check if we have a valid source to attempt loading
   const hasValidUri = React.useMemo(() => {
-    if (!source) return false;
-    if (typeof source === 'number') return true; // Local asset
-    if (Array.isArray(source)) return source.length > 0;
-    if (typeof source === 'object' && 'uri' in source) {
-      return !!source.uri && source.uri.trim() !== '';
+    if (!activeSource) return false;
+    if (typeof activeSource === 'number') return true; // Local asset
+    if (Array.isArray(activeSource)) return activeSource.length > 0;
+    if (typeof activeSource === 'object' && 'uri' in activeSource) {
+      return !!activeSource.uri && activeSource.uri.trim() !== '';
     }
     return false;
-  }, [sourceKey]);
+  }, [activeSource]);
 
-  const isLocalAsset = typeof source === 'number';
+  const isLocalAsset = typeof activeSource === 'number';
 
   const [loading, setLoading] = useState(hasValidUri && !isLocalAsset);
   const [error, setError] = useState(!hasValidUri);
@@ -54,8 +100,10 @@ export default function PremiumImage({
   const shimmerAnim = useRef(new Animated.Value(0.4)).current;
   const imageOpacity = useRef(new Animated.Value(isLocalAsset ? 1 : 0)).current;
 
-  // Restart loading state if source changes (using stable sourceKey)
   useEffect(() => {
+    if (sources && sources.length > 1 && !isInitialLoad.current) {
+      return;
+    }
     const valid = hasValidUri;
     const local = isLocalAsset;
     setLoading(valid && !local);
@@ -65,7 +113,33 @@ export default function PremiumImage({
     } else {
       imageOpacity.setValue(0);
     }
-  }, [sourceKey, hasValidUri, isLocalAsset]);
+    isInitialLoad.current = false;
+  }, [sourceKey, hasValidUri, isLocalAsset, sourcesKey]);
+
+  // Autoplay slideshow logic (horizontal sliding carousel scroll)
+  useEffect(() => {
+    const activeSources = sources || [];
+    if (activeSources.length <= 1 || containerWidth === 0) {
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setCurrentIndex((prevIndex) => {
+        const nextIndex = (prevIndex + 1) % activeSources.length;
+        try {
+          scrollViewRef.current?.scrollTo({
+            x: nextIndex * containerWidth,
+            animated: true,
+          });
+        } catch (err) {
+          console.warn('ScrollView scroll failed:', err);
+        }
+        return nextIndex;
+      });
+    }, autoplayInterval);
+
+    return () => clearInterval(timer);
+  }, [sourcesKey, autoplayInterval, containerWidth]);
 
   // Shimmer animation loop
   useEffect(() => {
@@ -139,6 +213,64 @@ export default function PremiumImage({
     return rest;
   }, [flatStyle]);
 
+  // ── Sliding Horizontal Carousel for Multiple Images ──
+  if (sources && sources.length > 1 && containerWidth > 0 && containerHeight > 0) {
+    return (
+      <View
+        style={[styles.container, viewSafeStyle, { borderRadius }]}
+        onLayout={handleLayout}
+      >
+        <ScrollView
+          ref={scrollViewRef}
+          horizontal
+          pagingEnabled
+          scrollEnabled={false}
+          showsHorizontalScrollIndicator={false}
+          style={{ width: '100%', height: '100%' }}
+        >
+          {sources.map((src, idx) => {
+            const hasValidSrc = !!src && (typeof src === 'number' || (typeof src === 'object' && !Array.isArray(src) && !!(src as any).uri));
+            if (!hasValidSrc) {
+              return (
+                <Image
+                  key={idx}
+                  source={FALLBACK_IMAGE}
+                  style={[
+                    styles.fallback,
+                    { borderRadius, width: containerWidth, height: containerHeight },
+                  ]}
+                  resizeMode="contain"
+                />
+              );
+            }
+            return (
+              <Image
+                key={idx}
+                {...props}
+                source={src!}
+                style={{ width: containerWidth, height: containerHeight, borderRadius }}
+                resizeMode={resizeMode}
+              />
+            );
+          })}
+        </ScrollView>
+        {sources.length > 1 && containerHeight > 70 && (
+          <View style={styles.carouselDots}>
+            {sources.map((_, idx) => (
+              <View
+                key={idx}
+                style={[
+                  styles.carouselDot,
+                  currentIndex === idx && styles.carouselDotActive,
+                ]}
+              />
+            ))}
+          </View>
+        )}
+      </View>
+    );
+  }
+
   // ── Error / no source → premium fallback ──
   if (error || !hasValidUri) {
     console.log('[PremiumImage] Rendering fallback. URL:', sourceKey, 'error:', error, 'hasValidUri:', hasValidUri, 'fallbackAsset:', FALLBACK_IMAGE);
@@ -151,6 +283,7 @@ export default function PremiumImage({
           viewSafeStyle,
         ]}
         resizeMode="contain"
+        onLayout={handleLayout}
       />
     );
   }
@@ -160,20 +293,24 @@ export default function PremiumImage({
     return (
       <Animated.Image
         {...props}
-        source={source!}
+        source={activeSource!}
         style={[style, { opacity: imageOpacity }]}
         resizeMode={resizeMode}
+        onLayout={handleLayout}
       />
     );
   }
 
   // ── Remote URI → wrapper with shimmer + fade-in ──
   return (
-    <View style={[styles.container, viewSafeStyle, { borderRadius }]}>
+    <View 
+      style={[styles.container, viewSafeStyle, { borderRadius }]}
+      onLayout={handleLayout}
+    >
       {/* Actual image — fills the container */}
       <Animated.Image
         {...props}
-        source={source!}
+        source={activeSource!}
         style={[
           StyleSheet.absoluteFill,
           { opacity: imageOpacity, borderRadius },
@@ -224,6 +361,27 @@ const styles = StyleSheet.create({
     backgroundColor: '#f1f5f9',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  carouselDots: {
+    position: 'absolute',
+    bottom: 4,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  carouselDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255, 255, 255, 0.4)',
+    marginHorizontal: 2,
+  },
+  carouselDotActive: {
+    backgroundColor: '#ffffff',
+    width: 8,
+    borderRadius: 2,
   },
 });
 

@@ -38,9 +38,13 @@ interface Product {
 
 interface Subcategory {
   _id: string;
+  parentCategoryId: string;
   name: string;
   icon?: string;
   image?: string;
+  images?: string[];
+  showOnApp: boolean;
+  sortOrder?: number;
 }
 
 interface ProductCardProps {
@@ -375,7 +379,7 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
     );
   }
 
-  const subcategoryItems = [{ _id: 'all', name: 'All', icon: '📦' }, ...subcategories];
+  const subcategoryItems: any[] = [{ _id: 'all', name: 'All', icon: '📦' }, ...subcategories];
 
   return (
     <View style={styles.container}>
@@ -410,6 +414,7 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
                     {!isAllTab && (
                       <PremiumImage
                         source={resolveMediaUrl(item.image) ? { uri: resolveMediaUrl(item.image)! } : null}
+                        sources={item.images ? item.images.map((img: string) => resolveMediaUrl(img) ? { uri: resolveMediaUrl(img)! } : null).filter((x: any) => x !== null) as any[] : []}
                         style={styles.subcategoryCardImage}
                         resizeMode="cover"
                         categoryName={item.name}
