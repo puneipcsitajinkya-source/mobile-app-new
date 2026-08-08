@@ -105,13 +105,25 @@ export default function SuccessScreen({ navigation, route }: Props) {
           <Text style={styles.orderId}>#{orderId.slice(-8).toUpperCase()}</Text>
         </View>
 
+        {!cancelled && (
+          <View style={styles.paymentBadge}>
+            <Ionicons name="wallet-outline" size={16} color="#16a34a" />
+            <Text style={styles.paymentBadgeText}>Payment: Cash / UPI (GPay, PhonePe) on Delivery</Text>
+          </View>
+        )}
+
         <Text style={styles.info}>
           {cancelled ? "" : t('thankYou')}
         </Text>
 
         <TouchableOpacity
           style={styles.homeBtn}
-          onPress={() => navigation.navigate('Main')}
+          onPress={() => {
+            navigation.navigate('Main', {
+              screen: 'Home',
+              params: { screen: 'HomeMain' },
+            } as any);
+          }}
           activeOpacity={0.85}
         >
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -185,4 +197,21 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   cancelBtnText: { color: '#dc2626', fontSize: 16, fontWeight: '800' },
+  paymentBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#f0fdf4',
+    borderColor: '#bbf7d0',
+    borderWidth: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    marginBottom: 20,
+  },
+  paymentBadgeText: {
+    color: '#15803d',
+    fontSize: 13,
+    fontWeight: '700',
+  },
 });

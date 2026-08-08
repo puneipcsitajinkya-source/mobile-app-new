@@ -9,6 +9,7 @@ import { RootStackParamList } from '../navigation/AppNavigator';
 import { useCart } from '../hooks/useCart';
 import { useLanguage } from '../hooks/useLanguage';
 import { getSettings, resolveMediaUrl } from '../services/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import PremiumLoader from '../components/PremiumLoader';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -24,10 +25,24 @@ export default function CartScreen({ navigation }: Props) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getSettings()
-      .then(res => setSettings(res.data))
-      .catch(console.error)
-      .finally(() => setLoading(false));
+    const fetchSettings = async () => {
+      let storeId = '';
+      const savedStore = await AsyncStorage.getItem('active_store');
+      if (savedStore) {
+        try {
+          storeId = JSON.parse(savedStore)._id;
+        } catch (e) {
+          console.error(e);
+        }
+      }
+
+      const params = storeId ? { store: storeId } : undefined;
+      getSettings(params)
+        .then(res => setSettings(res.data))
+        .catch(console.error)
+        .finally(() => setLoading(false));
+    };
+    fetchSettings();
   }, []);
 
   if (items.length === 0) {
@@ -38,7 +53,7 @@ export default function CartScreen({ navigation }: Props) {
         </View>
         <Text style={styles.emptyTitle}>{t('cartEmpty')}</Text>
         <Text style={styles.emptySubtitle}>{language === 'mr' ? 'पिशवीत काही उत्पादने जोडा!' : 'Add some products to your cart!'}</Text>
-        <TouchableOpacity style={styles.shopBtn} onPress={() => navigation.navigate('Home' as any)} activeOpacity={0.85}>
+        <TouchableOpacity style={styles.shopBtn} onPress={() => navigation.navigate('Home' as any, { screen: 'HomeMain' })} activeOpacity={0.85}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Ionicons name="storefront-outline" size={18} color="#ffffff" />
             <Text style={styles.shopBtnText}>{t('browseProducts')}</Text>
@@ -79,7 +94,7 @@ export default function CartScreen({ navigation }: Props) {
       </View>
 
       {loading ? (
-        <PremiumLoader message="Loading cart" subMessage="Preparing your order" fullScreen />
+        <PremiumLoader message="Loading cart" subMessage="Please wait a moment…" fullScreen />
       ) : (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 80 + insets.bottom }} showsVerticalScrollIndicator={false}>
           {/* Delivery Promise */}

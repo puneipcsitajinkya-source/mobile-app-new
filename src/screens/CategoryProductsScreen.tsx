@@ -11,6 +11,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { getProducts, getSubcategories, resolveMediaUrl } from '../services/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCart } from '../hooks/useCart';
 import { useLanguage } from '../hooks/useLanguage';
 import { Ionicons } from '@expo/vector-icons';
@@ -63,6 +64,10 @@ const SIDEBAR_WIDTH = 96;
 const FULL_CARD_WIDTH  = (width - 28) / 2;          // no sidebar: 2 cols, 6px gap on each side
 const SIDE_CARD_WIDTH  = ((width - SIDEBAR_WIDTH) - 20) / 2; // with sidebar: 2 cols, smaller column
 
+// Fixed image size — same for every product card so all images are equal
+const FULL_IMG_SIZE = FULL_CARD_WIDTH - 16;   // card width minus horizontal padding
+const SIDE_IMG_SIZE = SIDE_CARD_WIDTH - 16;
+
 const ProductCard = React.memo(function ProductCard({
   item, qty, onPress, onAdd, onIncrease, onDecrease, tProduct, cardWidth,
 }: ProductCardProps) {
@@ -106,11 +111,13 @@ const ProductCard = React.memo(function ProductCard({
     return Math.abs(hash % 9000) + 1000;
   }, [item._id]);
 
+  const imgSize = cardWidth === FULL_CARD_WIDTH ? FULL_IMG_SIZE : SIDE_IMG_SIZE;
+
   return (
     <View style={[styles.card, { width: cardWidth }]}>
 
-      {/* ── Image section (white bg) ── */}
-      <View style={styles.cardImgContainer}>
+      {/* ── Image section — fixed equal size for every card ── */}
+      <View style={[styles.cardImgContainer, { height: imgSize }]}>
         {item.images && item.images.length > 1 ? (
           <ScrollView
             ref={scrollViewRef}
@@ -120,18 +127,18 @@ const ProductCard = React.memo(function ProductCard({
             nestedScrollEnabled={true}
             onScroll={handleScroll}
             scrollEventThrottle={16}
-            style={{ width: '100%', height: '100%' }}
+            style={{ width: imgSize, height: imgSize }}
           >
             {item.images.map((imgUrl, idx) => (
               <TouchableOpacity
                 key={idx}
                 activeOpacity={0.93}
                 onPress={() => onPress(item._id)}
-                style={{ width: cardWidth, height: 120, alignItems: 'center', justifyContent: 'center', paddingTop: 12 }}
+                style={{ width: imgSize, height: imgSize, alignItems: 'center', justifyContent: 'center' }}
               >
                 <PremiumImage
                   source={resolveMediaUrl(imgUrl) ? { uri: resolveMediaUrl(imgUrl)! } : null}
-                  style={styles.cardImg}
+                  style={{ width: imgSize, height: imgSize }}
                   resizeMode="contain"
                   fallbackIcon="leaf-outline"
                   categoryName={item.category}
@@ -143,11 +150,11 @@ const ProductCard = React.memo(function ProductCard({
           <TouchableOpacity
             activeOpacity={0.93}
             onPress={() => onPress(item._id)}
-            style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', paddingTop: 12 }}
+            style={{ width: imgSize, height: imgSize, alignItems: 'center', justifyContent: 'center' }}
           >
             <PremiumImage
               source={resolveMediaUrl(item.image) ? { uri: resolveMediaUrl(item.image)! } : null}
-              style={styles.cardImg}
+              style={{ width: imgSize, height: imgSize }}
               resizeMode="contain"
               fallbackIcon="leaf-outline"
               categoryName={item.category}
@@ -273,9 +280,24 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
     setRefreshing(true);
 
     try {
+      let storeId = '';
+      const savedStore = await AsyncStorage.getItem('active_store');
+      if (savedStore) {
+        try {
+          storeId = JSON.parse(savedStore)._id;
+        } catch (e) {
+          console.error(e);
+        }
+      }
+
+      const queryParams: any = { category: categoryName };
+      if (storeId) {
+        queryParams.store = storeId;
+      }
+
       const [productResult, subcategoryResult] = await Promise.allSettled([
-        getProducts({ category: categoryName }),
-        getSubcategories(categoryName),
+        getProducts(queryParams),
+        getSubcategories(categoryName, storeId),
       ]);
 
       if (productResult.status === 'fulfilled') {
@@ -571,17 +593,13 @@ const styles = StyleSheet.create({
   },
   cardImgContainer: {
     width: '100%',
-    height: 120,
+    // height is set inline via imgSize — ensures all images are identical size
     backgroundColor: '#ffffff',
     position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingTop: 12,
-  },
-  cardImg: {
-    width: '85%',
-    height: '80%',
-    resizeMode: 'contain',
+    padding: 8,
+    overflow: 'hidden',
   },
   favIconBox: {
     position: 'absolute',

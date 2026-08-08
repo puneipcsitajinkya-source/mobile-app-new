@@ -90,6 +90,11 @@ const translations: Record<'en' | 'mr', Record<string, string>> = {
     nameRequiredMsg: 'Please enter your name.',
     messageRequiredMsg: 'Please enter your message.',
     ratingRequiredMsg: 'Please rate your experience.',
+    paymentMethod: 'Payment Method',
+    cashOnDelivery: 'Pay on Delivery (Cash / UPI)',
+    codDescription: 'Pay with Cash or UPI (GPay, PhonePe, Paytm QR) when your order arrives.',
+    importantNoteTitle: 'Important Note',
+    importantCodNote: 'At the time of delivery, you can pay using Cash OR via UPI (Google Pay, PhonePe, Paytm QR code) directly to our delivery partner.',
   },
   mr: {
     appTitle: 'Blinkit',
@@ -166,6 +171,11 @@ const translations: Record<'en' | 'mr', Record<string, string>> = {
     nameRequiredMsg: 'कृपया तुमचे नाव प्रविष्ट करा.',
     messageRequiredMsg: 'कृपया तुमचा संदेश प्रविष्ट करा.',
     ratingRequiredMsg: 'कृपया रेटिंग द्या.',
+    paymentMethod: 'पेमेंट पद्धत',
+    cashOnDelivery: 'डिलिव्हरीच्या वेळी पेमेंट (Cash / UPI)',
+    codDescription: 'ऑर्डर आल्यावर रोख (Cash) किंवा UPI (GPay, PhonePe, Paytm QR) द्वारे पेमेंट करा.',
+    importantNoteTitle: 'महत्त्वाची टीप',
+    importantCodNote: 'डिलिव्हरीच्या वेळी तुम्ही रोख रक्कम (Cash) किंवा UPI (Google Pay, PhonePe, Paytm QR कोड) द्वारे थेट डिलिव्हरी पार्टनरला पेमेंट करू शकता.',
   },
 };
 
@@ -288,39 +298,42 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
           setLanguageState(savedLang as Language);
         } else {
           // No saved preference — default to English immediately (no flash)
-          // then fetch backend default in background
+          // Fix 5: Defer backend language check to avoid duplicate getSettings() during startup.
+          // This runs 3s after mount so it doesn't compete with HomeScreen's critical API calls.
           setLanguageState('en');
-          getSettings()
-            .then((settingsRes) => {
-              const backendDefaultLang = settingsRes.data?.defaultLanguage;
-              if (backendDefaultLang && (backendDefaultLang === 'en' || backendDefaultLang === 'mr' || backendDefaultLang === 'hi')) {
-                if (backendDefaultLang !== 'en') {
-                  const englishKeys = Object.keys(translations.en);
-                  const existingCache = cacheObj[backendDefaultLang as Language] || {};
-                  const translatedCount = englishKeys.filter(k => existingCache[k]).length;
-                  const isTranslated = translatedCount >= englishKeys.length * 0.8;
+          setTimeout(() => {
+            getSettings()
+              .then((settingsRes) => {
+                const backendDefaultLang = settingsRes.data?.defaultLanguage;
+                if (backendDefaultLang && (backendDefaultLang === 'en' || backendDefaultLang === 'mr' || backendDefaultLang === 'hi')) {
+                  if (backendDefaultLang !== 'en') {
+                    const englishKeys = Object.keys(translations.en);
+                    const existingCache = cacheObj[backendDefaultLang as Language] || {};
+                    const translatedCount = englishKeys.filter(k => existingCache[k]).length;
+                    const isTranslated = translatedCount >= englishKeys.length * 0.8;
 
-                  if (!isTranslated) {
-                    const englishTexts = englishKeys.map(k => translations.en[k]);
-                    translateBatch(englishTexts, backendDefaultLang).then((translatedTexts) => {
-                      const newCacheForLang: Record<string, string> = { ...existingCache };
-                      englishKeys.forEach((key, index) => {
-                        newCacheForLang[key] = translatedTexts[index] || translations.en[key];
-                      });
-                      const newCacheObj = { ...cacheObj, [backendDefaultLang]: newCacheForLang };
-                      dynamicTranslationsRef.current = newCacheObj;
-                      setDynamicTranslations(newCacheObj);
-                      AsyncStorage.setItem('veggie_app_dynamic_translations_v2', JSON.stringify(newCacheObj)).catch(() => undefined);
+                    if (!isTranslated) {
+                      const englishTexts = englishKeys.map(k => translations.en[k]);
+                      translateBatch(englishTexts, backendDefaultLang).then((translatedTexts) => {
+                        const newCacheForLang: Record<string, string> = { ...existingCache };
+                        englishKeys.forEach((key, index) => {
+                          newCacheForLang[key] = translatedTexts[index] || translations.en[key];
+                        });
+                        const newCacheObj = { ...cacheObj, [backendDefaultLang]: newCacheForLang };
+                        dynamicTranslationsRef.current = newCacheObj;
+                        setDynamicTranslations(newCacheObj);
+                        AsyncStorage.setItem('veggie_app_dynamic_translations_v2', JSON.stringify(newCacheObj)).catch(() => undefined);
+                        setLanguageState(backendDefaultLang as Language);
+                      }).catch(() => undefined);
+                    } else {
                       setLanguageState(backendDefaultLang as Language);
-                    }).catch(() => undefined);
-                  } else {
-                    setLanguageState(backendDefaultLang as Language);
+                    }
                   }
+                  AsyncStorage.setItem('veggie_app_language', backendDefaultLang).catch(() => undefined);
                 }
-                AsyncStorage.setItem('veggie_app_language', backendDefaultLang).catch(() => undefined);
-              }
-            })
-            .catch(() => undefined); // silently ignore if backend unreachable
+              })
+              .catch(() => undefined); // silently ignore if backend unreachable
+          }, 3000);
         }
       } catch (err) {
         console.error('Failed to load language/cache from storage', err);

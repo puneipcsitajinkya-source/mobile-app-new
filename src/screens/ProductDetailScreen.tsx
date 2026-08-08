@@ -51,9 +51,26 @@ export default function ProductDetailScreen({ route, navigation }: Props) {
 
   const flatListRef = useRef<FlatList>(null);
 
-  const imagesList = product?.images && product.images.length > 0
-    ? product.images
+  const rawImages = product?.images && product.images.length > 0
+    ? product.images.filter(Boolean)
     : (product?.image ? [product.image] : []);
+  const imagesList = rawImages.length > 0 ? rawImages : [''];
+
+  const price = product?.price ?? 0;
+  const rawMrp = product?.mrp;
+  const rawDiscount = product?.discount;
+
+  const effectiveMrp = rawMrp && rawMrp > price
+    ? rawMrp
+    : (rawDiscount && rawDiscount > 0 && price > 0
+      ? Math.round(price / (1 - rawDiscount / 100))
+      : null);
+
+  const effectiveDiscount = rawDiscount && rawDiscount > 0
+    ? rawDiscount
+    : (effectiveMrp && effectiveMrp > price
+      ? Math.round(((effectiveMrp - price) / effectiveMrp) * 100)
+      : 0);
 
   useEffect(() => {
     let mounted = true;
@@ -193,9 +210,9 @@ export default function ProductDetailScreen({ route, navigation }: Props) {
               ))}
             </View>
           )}
-          {(product.discount ?? 0) > 0 && (
+          {effectiveDiscount > 0 && (
             <View style={styles.imageDiscountBadge}>
-              <Text style={styles.imageDiscountText}>{product.discount}% OFF</Text>
+              <Text style={styles.imageDiscountText}>{effectiveDiscount}% OFF</Text>
             </View>
           )}
         </View>
@@ -245,9 +262,14 @@ export default function ProductDetailScreen({ route, navigation }: Props) {
           <Text style={styles.unitText}>{product.unit || '1 pc'}</Text>
 
           <View style={styles.priceContainer}>
-            <Text style={styles.price}>₹{product.price}</Text>
-            {product.mrp != null && product.mrp > product.price && (
-              <Text style={styles.mrpText}>MRP ₹{product.mrp}</Text>
+            <Text style={styles.price}>₹{price}</Text>
+            {effectiveMrp != null && effectiveMrp > price && (
+              <Text style={styles.mrpText}>MRP ₹{effectiveMrp}</Text>
+            )}
+            {effectiveDiscount > 0 && (
+              <View style={styles.discountBadgeInline}>
+                <Text style={styles.discountBadgeInlineText}>{effectiveDiscount}% OFF</Text>
+              </View>
             )}
           </View>
 
@@ -351,6 +373,20 @@ const styles = StyleSheet.create({
   priceContainer: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
   price: { fontSize: 24, fontWeight: '800', color: '#0f172a' },
   mrpText: { fontSize: 14, color: '#94a3b8', textDecorationLine: 'line-through', fontWeight: '500', marginTop: 4 },
+  discountBadgeInline: {
+    backgroundColor: '#f3e8ff',
+    borderColor: '#d8b4fe',
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    marginLeft: 4,
+  },
+  discountBadgeInlineText: {
+    color: '#7c3aed',
+    fontWeight: '800',
+    fontSize: 12,
+  },
   imageDiscountBadge: {
     position: 'absolute',
     bottom: 12,

@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, FlatList,
-  StyleSheet, RefreshControl, ScrollView, Alert,
+  StyleSheet, RefreshControl, ScrollView, Alert, AppState,
 } from 'react-native';
 import { getOrder, getSettings, updateOrderStatus } from '../services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -10,7 +10,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useCart } from '../hooks/useCart';
 import { useNetwork } from '../hooks/useNetwork';
 import PremiumLoader from '../components/PremiumLoader';
+import OrderStatusLoader from '../components/OrderStatusLoader';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useIsFocused } from '@react-navigation/native';
 
 interface OrderItem {
   productId: string;
@@ -158,14 +160,28 @@ export default function OrdersScreen() {
 
   useEffect(() => {
     fetchOrders();
-    // Load dynamic support phone number
-    getSettings()
-      .then((res) => {
-        if (res.data && res.data.contactNumber) {
-          setContactPhone(res.data.contactNumber);
+    // Load dynamic support phone number from store-specific settings
+    const fetchSettings = async () => {
+      let storeId = '';
+      const savedStore = await AsyncStorage.getItem('active_store');
+      if (savedStore) {
+        try {
+          storeId = JSON.parse(savedStore)._id;
+        } catch (e) {
+          console.error(e);
         }
-      })
-      .catch((err) => console.log('Failed to fetch contact settings:', err));
+      }
+
+      const params = storeId ? { store: storeId } : undefined;
+      getSettings(params)
+        .then((res) => {
+          if (res.data && res.data.contactNumber) {
+            setContactPhone(res.data.contactNumber);
+          }
+        })
+        .catch((err) => console.log('Failed to fetch contact settings:', err));
+    };
+    fetchSettings();
   }, [fetchOrders]);
 
   // Auto-reload when internet connection is restored
@@ -175,6 +191,59 @@ export default function OrdersScreen() {
     });
     return unsubscribe;
   }, [onReconnect, fetchOrders]);
+
+  // Auto-poll every 20 seconds while the screen is focused and app is active
+  const isFocused = useIsFocused();
+  const hasActiveOrders = useMemo(
+    () => orders.some(o => ['pending', 'confirmed', 'out_for_delivery'].includes(o.status)),
+    [orders]
+  );
+
+  useEffect(() => {
+    if (!isFocused || !hasActiveOrders) return;
+
+    const POLL_INTERVAL = 120000; // 2 minutes
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
+    const startPolling = () => {
+      if (intervalId) return;
+      intervalId = setInterval(() => {
+        fetchOrders(true);
+      }, POLL_INTERVAL);
+    };
+
+    const stopPolling = () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+    };
+
+    // Start polling immediately
+    startPolling();
+
+    // Pause when app goes to background, resume + refresh when it comes back
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        fetchOrders(true); // Immediate refresh on foreground
+        startPolling();
+      } else {
+        stopPolling();
+      }
+    });
+
+    return () => {
+      stopPolling();
+      subscription.remove();
+    };
+  }, [isFocused, hasActiveOrders, fetchOrders]);
+
+  // Refetch when the tab/screen gains focus
+  useEffect(() => {
+    if (isFocused) {
+      fetchOrders(true);
+    }
+  }, [isFocused]);
 
   const getStatusColor = (status: Order['status']) => {
     switch (status) {
@@ -254,35 +323,8 @@ export default function OrdersScreen() {
           )}
         </View>
 
-        <View style={styles.divider} />
-
-        {/* Tracking Timeline */}
-        <View style={styles.timelineContainer}>
-          {(item.status === 'cancelled'
-            ? ['pending', 'confirmed', 'out_for_delivery', 'delivered', 'cancelled']
-            : ['pending', 'confirmed', 'out_for_delivery', 'delivered', 'closed']
-          ).map((s, index, arr) => {
-            const statuses = item.status === 'cancelled'
-              ? ['pending', 'confirmed', 'out_for_delivery', 'delivered', 'cancelled']
-              : ['pending', 'confirmed', 'out_for_delivery', 'delivered', 'closed'];
-            const labels = item.status === 'cancelled'
-              ? ['Order Placed', 'Confirmed', 'Out for Delivery', 'Delivered', 'Cancelled']
-              : ['Order Placed', 'Confirmed', 'Out for Delivery', 'Delivered', 'Closed'];
-            const currentIndex = statuses.indexOf(item.status);
-            const isActive = index <= currentIndex;
-            const isLast = index === arr.length - 1;
-
-            return (
-              <View key={s} style={styles.timelineStep}>
-                <View style={styles.timelineIconContainer}>
-                  <View style={[styles.timelineDot, isActive ? styles.timelineDotActive : null]} />
-                  {!isLast && <View style={[styles.timelineLine, isActive && index < currentIndex ? styles.timelineLineActive : null]} />}
-                </View>
-                <Text style={[styles.timelineText, isActive ? styles.timelineTextActive : null]}>{labels[index]}</Text>
-              </View>
-            );
-          })}
-        </View>
+        {/* Premium Animated Status Loader */}
+        <OrderStatusLoader status={item.status} />
 
         <View style={styles.divider} />
 
@@ -424,15 +466,7 @@ const styles = StyleSheet.create({
   orderDate: { fontSize: 12, color: '#94a3b8', marginTop: 2 },
   statusBadge: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
   statusText: { fontSize: 12, fontWeight: '700', textTransform: 'capitalize' },
-  timelineContainer: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 10, marginVertical: 12 },
-  timelineStep: { flex: 1, alignItems: 'center' },
-  timelineIconContainer: { flexDirection: 'row', alignItems: 'center', width: '100%' },
-  timelineDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#cbd5e1', zIndex: 1 },
-  timelineDotActive: { backgroundColor: '#a855f7' },
-  timelineLine: { flex: 1, height: 2, backgroundColor: '#e2e8f0', marginLeft: -2, marginRight: -2 },
-  timelineLineActive: { backgroundColor: '#a855f7' },
-  timelineText: { fontSize: 10, color: '#94a3b8', marginTop: 6, textAlign: 'center', width: 60, marginLeft: -24 },
-  timelineTextActive: { color: '#0f172a', fontWeight: '700' },
+  // (legacy timeline styles kept for fallback reference)
   divider: { height: 1, backgroundColor: '#f1f5f9', marginVertical: 12 },
   itemsSection: { gap: 8 },
   itemRow: { flexDirection: 'row', alignItems: 'center' },

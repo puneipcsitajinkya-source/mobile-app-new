@@ -53,6 +53,10 @@ export default function CheckoutScreen({ navigation }: Props) {
 
   const addressStorageLoaded = useRef(false);
   const contactStorageLoaded = useRef(false);
+  const scrollViewRef = useRef<ScrollView>(null);
+  const mobileSectionY = useRef(0);
+  const confirmMobileSectionY = useRef(0);
+  const locationSectionY = useRef(0);
   const { height } = useWindowDimensions();
 
   const headerHeight = Math.max(60, Math.round((height - insets.top) * 0.2));
@@ -141,12 +145,26 @@ export default function CheckoutScreen({ navigation }: Props) {
   };
 
   useEffect(() => {
-    getSettings()
-      .then((res) => {
-        setFees((prev) => ({ ...prev, ...res.data }));
-        setCheckoutDisabled(Boolean(res.data.checkoutDisabled));
-      })
-      .catch((err) => console.error('Error fetching settings:', err));
+    const fetchSettingsForStore = async () => {
+      let storeId = '';
+      const savedStore = await AsyncStorage.getItem('active_store');
+      if (savedStore) {
+        try {
+          storeId = JSON.parse(savedStore)._id;
+        } catch (e) {
+          console.error(e);
+        }
+      }
+
+      const params = storeId ? { store: storeId } : undefined;
+      getSettings(params)
+        .then((res) => {
+          setFees((prev) => ({ ...prev, ...res.data }));
+          setCheckoutDisabled(Boolean(res.data.checkoutDisabled));
+        })
+        .catch((err) => console.error('Error fetching settings:', err));
+    };
+    fetchSettingsForStore();
   }, []);
 
   const handleGetLocation = async () => {
@@ -156,6 +174,7 @@ export default function CheckoutScreen({ navigation }: Props) {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
         setLocationError(t('locationRequiredMsg'));
+        scrollViewRef.current?.scrollTo({ y: Math.max(0, locationSectionY.current - 15), animated: true });
         Alert.alert(t('permissionDenied'), t('locationPermissionMsg'));
         return;
       }
@@ -220,15 +239,18 @@ export default function CheckoutScreen({ navigation }: Props) {
       return;
     }
     if (!mobile || mobile.length < 10) {
+      scrollViewRef.current?.scrollTo({ y: Math.max(0, mobileSectionY.current - 15), animated: true });
       Alert.alert(t('errorTitle'), t('invalidMobileMsg'));
       return;
     }
     if (confirmMobile !== mobile) {
+      scrollViewRef.current?.scrollTo({ y: Math.max(0, confirmMobileSectionY.current - 15), animated: true });
       Alert.alert(t('errorTitle'), 'Contact numbers do not match. Please confirm your number.');
       return;
     }
     if (!location) {
       setLocationError(t('locationRequiredMsg'));
+      scrollViewRef.current?.scrollTo({ y: Math.max(0, locationSectionY.current - 15), animated: true });
       Alert.alert(t('errorTitle'), t('locationRequiredMsg'));
       return;
     }
@@ -241,11 +263,23 @@ export default function CheckoutScreen({ navigation }: Props) {
 
     setPlacing(true);
     try {
+      const savedStore = await AsyncStorage.getItem('active_store');
+      let storeId = '';
+      if (savedStore) {
+        try {
+          storeId = JSON.parse(savedStore)._id;
+        } catch (e) {
+          console.error(e);
+        }
+      }
+
       const res = await placeOrder({
         mobile,
         latitude: location?.latitude ?? 0,
         longitude: location?.longitude ?? 0,
         address: address.trim(),
+        store: storeId || undefined,
+        paymentMethod: 'Pay on Delivery (Cash/UPI)',
         items: items.map((i) => ({
           productId: i._id,
           name: typeof i.name === 'object' ? `${i.name.en} (${i.name.mr})` : i.name,
@@ -292,28 +326,34 @@ export default function CheckoutScreen({ navigation }: Props) {
   const hasAnyDetail = Boolean(address.trim() || mobile.trim() || confirmMobile.trim() || location);
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+    <View style={{ flex: 1, backgroundColor: '#f1f5f9' }}>
+      <ScrollView
+        ref={scrollViewRef}
+        style={styles.container}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 20 }}
+      >
 
-      {hasAnyDetail && (
-        <TouchableOpacity
-          style={styles.topClearBtn}
-          onPress={handleNewAddress}
-          activeOpacity={0.85}
-        >
-          <Ionicons name="trash-outline" size={15} color="#a855f7" />
-          <Text style={styles.topClearBtnText}>Clear All Details For New Address</Text>
-        </TouchableOpacity>
-      )}
+        {hasAnyDetail && (
+          <TouchableOpacity
+            style={styles.topClearBtn}
+            onPress={handleNewAddress}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="trash-outline" size={15} color="#a855f7" />
+            <Text style={styles.topClearBtnText}>Clear All Details For New Address</Text>
+          </TouchableOpacity>
+        )}
 
-      {!isConnected && (
-        <View style={styles.noticeBox}>
-          <Ionicons name="cloud-offline-outline" size={16} color="#dc2626" />
-          <Text style={styles.noticeText}>{t('cartUnavailableMsg')}</Text>
-        </View>
-      )}
+        {!isConnected && (
+          <View style={styles.noticeBox}>
+            <Ionicons name="cloud-offline-outline" size={16} color="#dc2626" />
+            <Text style={styles.noticeText}>{t('cartUnavailableMsg')}</Text>
+          </View>
+        )}
 
       {/* Mobile Number */}
-      <View style={styles.section}>
+      <View style={styles.section} onLayout={(e) => { mobileSectionY.current = e.nativeEvent.layout.y; }}>
         <View style={styles.sectionHeader}>
           <Ionicons name="call-outline" size={18} color="#a855f7" />
           <Text style={styles.sectionTitle}>{t('mobileNumber')}</Text>
@@ -336,7 +376,7 @@ export default function CheckoutScreen({ navigation }: Props) {
       </View>
 
       {/* Confirm Contact Number */}
-      <View style={styles.section}>
+      <View style={styles.section} onLayout={(e) => { confirmMobileSectionY.current = e.nativeEvent.layout.y; }}>
         <View style={styles.sectionHeader}>
           <Ionicons name="shield-checkmark-outline" size={18} color="#a855f7" />
           <Text style={styles.sectionTitle}>Confirm Contact Number</Text>
@@ -392,7 +432,7 @@ export default function CheckoutScreen({ navigation }: Props) {
       </View>
 
       {/* Location */}
-      <View style={styles.section}>
+      <View style={styles.section} onLayout={(e) => { locationSectionY.current = e.nativeEvent.layout.y; }}>
         <View style={styles.sectionHeader}>
           <Ionicons name="location-outline" size={18} color="#a855f7" />
           <Text style={styles.sectionTitle}>{t('deliveryLocation')}</Text>
@@ -424,6 +464,52 @@ export default function CheckoutScreen({ navigation }: Props) {
           </TouchableOpacity>
         )}
         {locationError ? <Text style={styles.errorText}>{locationError}</Text> : null}
+      </View>
+
+      {/* Payment Method */}
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Ionicons name="card-outline" size={18} color="#a855f7" />
+          <Text style={styles.sectionTitle}>{t('paymentMethod')}</Text>
+        </View>
+
+        <View style={styles.codCard}>
+          <View style={styles.codHeader}>
+            <View style={styles.codBadgeIcon}>
+              <Ionicons name="wallet-outline" size={22} color="#a855f7" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <Text style={styles.codTitle}>{t('cashOnDelivery')}</Text>
+                <View style={styles.codBadge}>
+                  <Text style={styles.codBadgeText}>RECOMMENDED</Text>
+                </View>
+              </View>
+              <Text style={styles.codSub}>{t('codDescription')}</Text>
+            </View>
+            <Ionicons name="checkmark-circle" size={24} color="#22c55e" />
+          </View>
+
+          {/* Payment Modes Available at Delivery */}
+          <View style={styles.upiBadgesRow}>
+            <View style={[styles.upiTag, { backgroundColor: '#ecfdf5', borderColor: '#a7f3d0' }]}>
+              <Ionicons name="cash-outline" size={13} color="#059669" />
+              <Text style={[styles.upiTagText, { color: '#047857' }]}>Cash</Text>
+            </View>
+            <View style={[styles.upiTag, { backgroundColor: '#f0f9ff', borderColor: '#bae6fd' }]}>
+              <Ionicons name="qr-code-outline" size={13} color="#0284c7" />
+              <Text style={[styles.upiTagText, { color: '#0369a1' }]}>GPay</Text>
+            </View>
+            <View style={[styles.upiTag, { backgroundColor: '#faf5ff', borderColor: '#e9d5ff' }]}>
+              <Ionicons name="phone-portrait-outline" size={13} color="#7c3aed" />
+              <Text style={[styles.upiTagText, { color: '#6d28d9' }]}>PhonePe</Text>
+            </View>
+
+          </View>
+
+          {/* Prominent Important Note Highlight */}
+
+        </View>
       </View>
 
       {/* Order Summary */}
@@ -505,27 +591,35 @@ export default function CheckoutScreen({ navigation }: Props) {
         </View>
       </View>
 
-      <TouchableOpacity
-        style={[styles.placeBtn, !isReady && styles.placeBtnDisabled]}
-        onPress={handlePlaceOrder}
-        disabled={placing || !isReady}
-        activeOpacity={0.85}
-      >
-        {placing ? (
-          <View style={[styles.placeBtnContent, styles.placeBtnLoadingContent]}>
-            <PremiumLoader size="xsmall" fullScreen={false} />
-            <Text style={styles.placeBtnText} numberOfLines={1}>{t('placeOrder')}</Text>
-          </View>
-        ) : (
-          <View style={styles.placeBtnContent}>
-            <Ionicons name="paper-plane-outline" size={18} color="#ffffff" />
-            <Text style={styles.placeBtnText} numberOfLines={1} ellipsizeMode="tail">{t('placeOrder')}</Text>
-          </View>
-        )}
-      </TouchableOpacity>
+      </ScrollView>
 
-      <View style={{ height: Math.max(insets.bottom, 24) }} />
-    </ScrollView>
+      {/* Sticky Bottom Footer Bar */}
+      <View style={[styles.stickyBottomBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+        <View style={styles.stickyTotalWrap}>
+          <Text style={styles.stickyTotalLabel}>{t('total') || 'Total'}</Text>
+          <Text style={styles.stickyTotalValue}>₹{grandTotal.toFixed(2)}</Text>
+        </View>
+
+        <TouchableOpacity
+          style={[styles.stickyPlaceBtn, !isReady && styles.stickyPlaceBtnDisabled]}
+          onPress={handlePlaceOrder}
+          disabled={placing || !isReady}
+          activeOpacity={0.85}
+        >
+          {placing ? (
+            <View style={styles.stickyPlaceBtnContent}>
+              <PremiumLoader size="xsmall" fullScreen={false} />
+              <Text style={styles.stickyPlaceBtnText} numberOfLines={1}>{t('placeOrder')}</Text>
+            </View>
+          ) : (
+            <View style={styles.stickyPlaceBtnContent}>
+              <Ionicons name="paper-plane-outline" size={18} color="#ffffff" />
+              <Text style={styles.stickyPlaceBtnText} numberOfLines={1}>{t('placeOrder')}</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+      </View>
+    </View>
   );
 }
 
@@ -639,5 +733,147 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#a855f7',
     fontWeight: '700',
+  },
+  codCard: {
+    backgroundColor: '#faf5ff',
+    borderWidth: 1.5,
+    borderColor: '#c084fc',
+    borderRadius: 14,
+    padding: 14,
+  },
+  codHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  codBadgeIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    backgroundColor: '#f3e8ff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  codTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#0f172a',
+  },
+  codBadge: {
+    backgroundColor: '#dcfce7',
+    borderColor: '#86efac',
+    borderWidth: 1,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  codBadgeText: {
+    color: '#15803d',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  codSub: {
+    fontSize: 12,
+    color: '#64748b',
+    marginTop: 2,
+  },
+  importantNoticeBox: {
+    marginTop: 12,
+    backgroundColor: '#f5f3ff',
+    borderColor: '#ddd6fe',
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  importantNoticeText: {
+    flex: 1,
+    fontSize: 12.5,
+    color: '#4c1d95',
+    lineHeight: 18,
+    fontWeight: '500',
+  },
+  upiBadgesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 10,
+  },
+  upiTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  upiTagText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  stickyBottomBar: {
+    backgroundColor: '#ffffff',
+    borderTopWidth: 1,
+    borderColor: '#e2e8f0',
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  stickyTotalWrap: {
+    justifyContent: 'center',
+  },
+  stickyTotalLabel: {
+    fontSize: 11,
+    color: '#64748b',
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  stickyTotalValue: {
+    fontSize: 20,
+    color: '#a855f7',
+    fontWeight: '900',
+  },
+  stickyPlaceBtn: {
+    flex: 1,
+    maxWidth: 220,
+    backgroundColor: '#a855f7',
+    borderRadius: 14,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#a855f7',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  stickyPlaceBtnDisabled: {
+    backgroundColor: '#d8b4fe',
+    shadowOpacity: 0,
+  },
+  stickyPlaceBtnContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  stickyPlaceBtnText: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '800',
   },
 });

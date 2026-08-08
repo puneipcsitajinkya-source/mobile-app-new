@@ -4,7 +4,7 @@ import {
   StyleSheet, RefreshControl, Dimensions,
   Animated, Easing, Platform, Modal, Image,
   ScrollView, NativeSyntheticEvent, NativeScrollEvent,
-  Linking
+  Linking, Alert
 } from 'react-native';
 import PremiumImage from '../components/PremiumImage';
 import * as SplashScreen from 'expo-splash-screen';
@@ -14,7 +14,9 @@ import { CompositeNavigationProp } from '@react-navigation/native';
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList, TabParamList } from '../navigation/AppNavigator';
-import { getProducts, getCategories, resolveMediaUrl, getSettings } from '../services/api';
+import { getProducts, getCategories, resolveMediaUrl, getSettings, findNearestStore, getStores } from '../services/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Location from 'expo-location';
 import { useCart } from '../hooks/useCart';
 import { useLanguage } from '../hooks/useLanguage';
 import { useNetwork } from '../hooks/useNetwork';
@@ -163,7 +165,8 @@ const ProductCard = memo(function ProductCard({
               >
                 <PremiumImage
                   source={resolveMediaUrl(imgUrl) ? { uri: resolveMediaUrl(imgUrl)! } : null}
-                  style={styles.blinkImg}
+                  style={{ width: 110, height: 110 }}
+                  resizeMode="contain"
                   fallbackIcon="leaf-outline"
                   categoryName={item.category}
                 />
@@ -178,7 +181,8 @@ const ProductCard = memo(function ProductCard({
           >
             <PremiumImage
               source={resolveMediaUrl(item.image) ? { uri: resolveMediaUrl(item.image)! } : null}
-              style={styles.blinkImg}
+              style={{ width: 110, height: 110 }}
+              resizeMode="contain"
               fallbackIcon="leaf-outline"
               categoryName={item.category}
             />
@@ -254,20 +258,245 @@ export default function HomeScreen({ navigation }: Props) {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const { addToCart, items: cart, totalItems, totalAmount: cartTotal, increaseQty, decreaseQty } = useCart();
+  const { addToCart, items: cart, totalItems, totalAmount: cartTotal, increaseQty, decreaseQty, clearCart } = useCart();
   const [langModalVisible, setLangModalVisible] = useState(false);
   const { language, setLanguage, translating, tProduct, tCategory } = useLanguage();
   const { onReconnect } = useNetwork();
 
+  // Location and Store States
+  const [activeStore, setActiveStore] = useState<any>(null);
+  const [allStores, setAllStores] = useState<any[]>([]);
+  const [showStoreModal, setShowStoreModal] = useState(false);
+  const [locLoading, setLocLoading] = useState(false);
 
-  const load = useCallback(async () => {
-    const startedAt = Date.now();
+  // Not Deliverable Popup States
+  const [isNotDeliverable, setIsNotDeliverable] = useState(false);
+  const [showNotDeliverablePopup, setShowNotDeliverablePopup] = useState(false);
+  const notDeliverableScaleAnim = useRef(new Animated.Value(0)).current;
+  const notDeliverableOpacityAnim = useRef(new Animated.Value(0)).current;
 
+  const fetchAllStores = async () => {
     try {
+      const res = await getStores();
+      setAllStores(res.data || []);
+    } catch (e) {
+      console.error('Failed to fetch stores:', e);
+      Alert.alert(
+        'Connection Error',
+        'Failed to connect to the server. Please check your internet connection and try again.',
+        [{ text: 'Retry', onPress: fetchAllStores }]
+      );
+    }
+  };
+
+  const handleFallbackStore = async (): Promise<string | undefined> => {
+    // Fallback: Check if there's a saved store
+    const savedStore = await AsyncStorage.getItem('active_store');
+    if (savedStore) {
+      try {
+        const parsed = JSON.parse(savedStore);
+        setActiveStore(parsed);
+        return parsed._id; // Return store ID so load() can be called
+      } catch (e) {
+        await AsyncStorage.removeItem('active_store');
+      }
+    }
+
+    // No saved store: show list of all stores
+    await fetchAllStores();
+    // Hide the full-screen loading spinner so the modal is visible
+    setLoading(false);
+    SplashScreen.hideAsync().catch(() => undefined);
+    setShowStoreModal(true);
+    return undefined; // Modal is open, load() will be called when user selects a store
+  };
+
+  const checkLocationAndResolveStore = async (): Promise<string | undefined> => {
+    setLocLoading(true);
+    try {
+      // 1. Check if location services are enabled
+      let servicesEnabled = await Location.hasServicesEnabledAsync();
+      while (!servicesEnabled) {
+        if (Platform.OS === 'android') {
+          try {
+            await Location.enableNetworkProviderAsync();
+            servicesEnabled = await Location.hasServicesEnabledAsync();
+          } catch (enableErr) {
+            console.log('Error enabling network provider:', enableErr);
+          }
+        }
+        
+        if (!servicesEnabled) {
+          const retry = await new Promise<boolean>((resolve) => {
+            Alert.alert(
+              'Location Services Required',
+              'Please turn on Location Services on your device to automatically find the nearest store.',
+              [
+                { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+                { text: 'Try Again', onPress: () => resolve(true) }
+              ]
+            );
+          });
+          if (!retry) {
+            const fallbackId = await handleFallbackStore();
+            setLocLoading(false);
+            return fallbackId;
+          }
+        }
+      }
+
+      // 2. Request / check permission
+      let { status, canAskAgain } = await Location.requestForegroundPermissionsAsync();
+      while (status !== 'granted') {
+        const retry = await new Promise<boolean>((resolve) => {
+          if (!canAskAgain) {
+            Alert.alert(
+              'Location Permission Required',
+              'Location permission is required to find your nearest store. Please enable it in device settings.',
+              [
+                { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+                { text: 'Open Settings', onPress: () => { Linking.openSettings(); resolve(false); } },
+                { text: 'Try Again', onPress: () => resolve(true) }
+              ]
+            );
+          } else {
+            Alert.alert(
+              'Location Permission Required',
+              'Location permission is required to find your nearest store.',
+              [
+                { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+                { text: 'Try Again', onPress: () => resolve(true) }
+              ]
+            );
+          }
+        });
+
+        if (!retry) {
+          const fallbackId = await handleFallbackStore();
+          setLocLoading(false);
+          return fallbackId;
+        }
+
+        const reqResult = await Location.requestForegroundPermissionsAsync();
+        status = reqResult.status;
+        canAskAgain = reqResult.canAskAgain;
+      }
+
+      // 3. Try last known position first (quick fallback)
+      const lastKnown = await Location.getLastKnownPositionAsync({});
+      if (lastKnown) {
+        console.log(`[GPS] Found lastKnown coordinates: lat=${lastKnown.coords.latitude}, lng=${lastKnown.coords.longitude}`);
+        const nearestRes = await findNearestStore(lastKnown.coords.latitude, lastKnown.coords.longitude);
+        console.log(`[GPS] Nearest store response for lastKnown: distance=${nearestRes.data?.distance}km, isServiceable=${nearestRes.data?.isServiceable}`);
+        if (nearestRes.data && nearestRes.data.store && nearestRes.data.isServiceable) {
+          const store = nearestRes.data.store;
+          await AsyncStorage.setItem('active_store', JSON.stringify(store));
+          setActiveStore(store);
+          console.log(`[GPS] Store resolved from lastKnown: ${store.name} (${store._id}), distance=${nearestRes.data.distance}km`);
+          return store._id;
+        }
+      }
+
+      // 4. Helper to fetch location with timeout (exactly like CheckoutScreen)
+      const fetchLocation = async (accuracy: number, timeoutMs: number) => {
+        try {
+          console.log(`[GPS] Requesting fresh location with accuracy level: ${accuracy}...`);
+          return await Promise.race([
+            Location.getCurrentPositionAsync({ accuracy }),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+          ]);
+        } catch (e) {
+          console.warn(`[GPS] Location fetch (${accuracy}) failed:`, e);
+          return null;
+        }
+      };
+
+      // Attempt low accuracy first, then balanced if needed
+      let fresh = await fetchLocation(Location.Accuracy.Low, 3000);
+      if (!fresh) {
+        console.log('[GPS] Low accuracy location request timed out. Falling back to Balanced accuracy...');
+        fresh = await fetchLocation(Location.Accuracy.Balanced, 5000);
+      }
+
+      if (fresh) {
+        console.log(`[GPS] Resolved fresh coordinates: lat=${fresh.coords.latitude}, lng=${fresh.coords.longitude}`);
+        const nearestRes = await findNearestStore(fresh.coords.latitude, fresh.coords.longitude);
+        console.log(`[GPS] Nearest store response for fresh: distance=${nearestRes.data?.distance}km, isServiceable=${nearestRes.data?.isServiceable}`);
+        if (nearestRes.data && nearestRes.data.store && nearestRes.data.isServiceable) {
+          const store = nearestRes.data.store;
+          await AsyncStorage.setItem('active_store', JSON.stringify(store));
+          setActiveStore(store);
+          console.log(`[GPS] Store resolved from fresh GPS: ${store.name} (${store._id}), distance=${nearestRes.data.distance}km`);
+          return store._id;
+        }
+      } else {
+        console.log('[GPS] Failed to retrieve fresh coordinates (request timed out or failed).');
+      }
+
+      // If fresh location is not available or not serviceable:
+      // Show styled popup instead of plain Alert
+      setIsNotDeliverable(true);
+      setShowNotDeliverablePopup(true);
+      // Animate popup in
+      notDeliverableScaleAnim.setValue(0);
+      notDeliverableOpacityAnim.setValue(0);
+      Animated.parallel([
+        Animated.spring(notDeliverableScaleAnim, { toValue: 1, useNativeDriver: true, tension: 280, friction: 12 }),
+        Animated.timing(notDeliverableOpacityAnim, { toValue: 1, duration: 250, useNativeDriver: true }),
+      ]).start();
+      // Hide loading and splash so products are visible behind the popup
+      setLoading(false);
+      SplashScreen.hideAsync().catch(() => undefined);
+      return undefined; // No store selected, user browses all products
+    } catch (err: any) {
+      console.log('Error resolving nearest store via location:', err);
+      const errMsg = err?.message || JSON.stringify(err) || String(err);
+      
+      const retry = await new Promise<boolean>((resolve) => {
+        Alert.alert(
+          'Location Error',
+          `Could not retrieve location/store.\n\nDetails: ${errMsg}\n\nWould you like to try again or select a store manually?`,
+          [
+            { text: 'Select Store', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Try Again', onPress: () => resolve(true) }
+          ],
+          { cancelable: false }
+        );
+      });
+      
+      if (retry) {
+        checkLocationAndResolveStore();
+      } else {
+        return await handleFallbackStore();
+      }
+    } finally {
+      setLocLoading(false);
+    }
+  };
+
+  const load = useCallback(async (resolvedStoreId?: string) => {
+    try {
+      let storeId = resolvedStoreId || '';
+      if (!storeId) {
+        const savedStore = await AsyncStorage.getItem('active_store');
+        if (savedStore) {
+          try {
+            const parsed = JSON.parse(savedStore);
+            storeId = parsed._id;
+            setActiveStore(parsed);
+          } catch (e) {
+            console.error(e);
+          }
+        }
+      }
+
+      const params = storeId ? { store: storeId } : undefined;
+      console.log(`[Load] Fetching products${storeId ? ` for store ${storeId}` : ' (all stores)'}`);
+
       const [prodRes, catRes, settingsRes] = await Promise.all([
-        getProducts(),
-        getCategories(),
-        getSettings().catch(() => ({ data: null })),
+        getProducts(params),
+        getCategories(params),
+        getSettings(params).catch(() => ({ data: null })),
       ]);
       setProducts(prodRes.data);
       setCategories(catRes.data);
@@ -302,45 +531,81 @@ export default function HomeScreen({ navigation }: Props) {
           ]);
         }
       }
-
-      // Prefetch product images for instant loading
-      if (prodRes.data && Array.isArray(prodRes.data)) {
-        prodRes.data.slice(0, 15).forEach((p: Product) => {
-          const resolved = resolveMediaUrl(p.image);
-          if (resolved && (resolved.startsWith('http://') || resolved.startsWith('https://'))) {
-            Image.prefetch(resolved).catch(err => console.log('Product image prefetch failed:', resolved, err));
-          }
-        });
-      }
-
-      // Prefetch category images
-      if (catRes.data && Array.isArray(catRes.data)) {
-        catRes.data.forEach((c: Category) => {
-          const resolved = resolveMediaUrl(c.image);
-          if (resolved && (resolved.startsWith('http://') || resolved.startsWith('https://'))) {
-            Image.prefetch(resolved).catch(err => console.log('Category image prefetch failed:', resolved, err));
-          }
-        });
-      }
     } catch (e) {
       console.error(e);
     } finally {
-      const elapsed = Date.now() - startedAt;
-      const remaining = Math.max(0, 600 - elapsed);
-
-      if (remaining > 0) {
-        await new Promise((resolve) => setTimeout(resolve, remaining));
-      }
-
-      // Hide native splash BEFORE revealing content — no PremiumLoader flash
+      // Fix 4: Removed artificial 600ms delay — show content immediately
       SplashScreen.hideAsync().catch(() => undefined);
-
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
-  useEffect(() => { load(); }, []);
+  // Fix 7: Prefetch images AFTER content is displayed (runs when products/categories change)
+  useEffect(() => {
+    if (loading || products.length === 0) return;
+
+    // Prefetch product images in background (fire-and-forget, doesn't block UI)
+    products.slice(0, 15).forEach((p: Product) => {
+      const resolved = resolveMediaUrl(p.image);
+      if (resolved && (resolved.startsWith('http://') || resolved.startsWith('https://'))) {
+        Image.prefetch(resolved).catch(() => {});
+      }
+    });
+
+    // Prefetch category images in background
+    categories.forEach((c: Category) => {
+      const resolved = resolveMediaUrl(c.image);
+      if (resolved && (resolved.startsWith('http://') || resolved.startsWith('https://'))) {
+        Image.prefetch(resolved).catch(() => {});
+      }
+    });
+  }, [loading, products, categories]);
+
+  // Parallelize location + data loading aggressively.
+  // ALWAYS start loading data immediately — don't wait for GPS.
+  // If no saved store, load ALL products first, then reload with correct store when GPS resolves.
+  useEffect(() => {
+    const startup = async () => {
+      // Hide native splash immediately — show our animated PremiumLoader instead.
+      // The PremiumLoader provides much better visual feedback than a static splash image.
+      SplashScreen.hideAsync().catch(() => undefined);
+
+      // Check if we have a saved store
+      const savedStore = await AsyncStorage.getItem('active_store');
+      let quickLoadStoreId: string | undefined;
+
+      if (savedStore) {
+        try {
+          const parsed = JSON.parse(savedStore);
+          quickLoadStoreId = parsed._id;
+          setActiveStore(parsed);
+        } catch (e) {
+          await AsyncStorage.removeItem('active_store');
+        }
+      }
+
+      // Start loading data RIGHT NOW — don't wait for GPS
+      // If we have a saved store, use it. Otherwise load without store filter (all products).
+      console.log(`[Startup] Quick-loading data ${quickLoadStoreId ? `for saved store ${quickLoadStoreId}` : '(all products, no store filter)'}`);
+      load(quickLoadStoreId);
+
+      // Resolve location in background
+      const resolvedStoreId = await checkLocationAndResolveStore();
+
+      if (resolvedStoreId) {
+        // If location resolved to a DIFFERENT store than what we quick-loaded, reload
+        if (resolvedStoreId !== quickLoadStoreId) {
+          console.log('[Startup] Store changed after location resolve, reloading with new store...');
+          setRefreshing(true);
+          load(resolvedStoreId);
+        }
+      }
+      // If no store resolved (modal is open), load() will be called when user selects a store
+    };
+
+    startup();
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onReconnect(() => {
@@ -639,6 +904,29 @@ export default function HomeScreen({ navigation }: Props) {
 
   const listHeaderComponent = useMemo(() => (
     <View>
+      {/* Not Deliverable Reminder Banner */}
+      {isNotDeliverable && !showNotDeliverablePopup && (
+        <TouchableOpacity
+          style={styles.notDeliverableBanner}
+          activeOpacity={0.8}
+          onPress={async () => {
+            await fetchAllStores();
+            setShowStoreModal(true);
+          }}
+        >
+          <View style={styles.notDeliverableBannerLeft}>
+            <Ionicons name="location-outline" size={18} color="#b45309" />
+            <Text style={styles.notDeliverableBannerText}>
+              Delivery not available at your location
+            </Text>
+          </View>
+          <View style={styles.notDeliverableBannerAction}>
+            <Text style={styles.notDeliverableBannerActionText}>Change</Text>
+            <Ionicons name="chevron-forward" size={14} color="#b45309" />
+          </View>
+        </TouchableOpacity>
+      )}
+
       {!search && (
         <View style={styles.promoWrapper}>
           <FlatList
@@ -697,7 +985,7 @@ export default function HomeScreen({ navigation }: Props) {
         </View>
       )}
     </View>
-  ), [search, uniqueCategories, navigation, tCategory, promoItems, activePromoIndex]);
+  ), [search, uniqueCategories, navigation, tCategory, promoItems, activePromoIndex, isNotDeliverable, showNotDeliverablePopup]);
 
   const emptyStateComponent = useMemo(() => (
     <View style={styles.emptyState}>
@@ -726,13 +1014,26 @@ export default function HomeScreen({ navigation }: Props) {
       <View style={[styles.header, { paddingTop: Math.max(insets.top, 16) }]}>
         <View style={styles.headerTop}>
           <View style={styles.headerLeft}>
-            <View style={styles.headerBrand}>
-                  <PremiumImage source={APP_LOGO} style={styles.headerLogo} />
-              <View>
-                <Text style={styles.deliveryTitle}>Firstmartt</Text>
-                <Text style={styles.deliverySubtitle}>Delivery in 10 minutes</Text>
+            <TouchableOpacity
+              style={[styles.headerBrand, { flexDirection: 'row', alignItems: 'center', gap: 6 }]}
+              onPress={async () => {
+                await fetchAllStores();
+                setShowStoreModal(true);
+              }}
+            >
+              <PremiumImage source={APP_LOGO} style={styles.headerLogo} />
+              <View style={{ maxWidth: 160 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
+                  <Text style={styles.deliveryTitle} numberOfLines={1}>
+                    {activeStore ? activeStore.name : 'Locating...'}
+                  </Text>
+                  <Ionicons name="chevron-down" size={13} color="#ffffff" style={{ marginLeft: 2 }} />
+                </View>
+                <Text style={styles.deliverySubtitle} numberOfLines={1}>
+                  {activeStore ? activeStore.address : 'Finding nearest store'}
+                </Text>
               </View>
-            </View>
+            </TouchableOpacity>
 
           </View>
           {/* <TouchableOpacity style={styles.profileBtn}>
@@ -826,10 +1127,6 @@ export default function HomeScreen({ navigation }: Props) {
                   <Ionicons name="close-circle" size={20} color="#7c3aed" />
                 </TouchableOpacity>
               </Animated.View>
-            )}
-
-            {!search && !searchFocused && (
-              <Ionicons name="mic-outline" size={20} color="#94a3b8" style={{ marginLeft: 8 }} />
             )}
           </View>
         </Animated.View>
@@ -927,6 +1224,164 @@ export default function HomeScreen({ navigation }: Props) {
           />
         </View>
       )}
+
+      {/* Store Selection Modal */}
+      <Modal
+        visible={showStoreModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => {
+          if (activeStore) {
+            setShowStoreModal(false);
+          }
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { width: '90%', maxHeight: '80%' }]}>
+            <Text style={[styles.modalTitle, { marginBottom: 6 }]}>🏪 Select Delivery Store</Text>
+            <Text style={{ textAlign: 'center', color: '#64748b', fontSize: 13, marginBottom: 20 }}>
+              We serve fresh groceries from your nearest physical store location. Please select one below.
+            </Text>
+
+            {locLoading ? (
+              <View style={{ paddingVertical: 40, alignItems: 'center' }}>
+                <PremiumLoader message="Checking GPS Location..." subMessage="Finding nearest store" size="small" fullScreen={false} />
+              </View>
+            ) : (
+              <FlatList
+                data={allStores}
+                keyExtractor={(item) => item._id}
+                renderItem={({ item }) => {
+                  const isSelected = activeStore?._id === item._id;
+                  return (
+                    <TouchableOpacity
+                      style={[
+                        styles.langOption,
+                        isSelected && styles.activeLangOption,
+                        { flexDirection: 'column', alignItems: 'flex-start', paddingVertical: 14 }
+                      ]}
+                      onPress={() => {
+                        const selectStore = async () => {
+                          const proceed = async () => {
+                            if (cart.length > 0) {
+                              clearCart();
+                            }
+                            setActiveStore(item);
+                            await AsyncStorage.setItem('active_store', JSON.stringify(item));
+                            setShowStoreModal(false);
+                            load(item._id);
+                          };
+
+                          if (cart.length > 0 && activeStore?._id !== item._id) {
+                            Alert.alert(
+                              'Change Store?',
+                              'Your cart contains items from another store location. Changing stores will clear your current cart.',
+                              [
+                                { text: 'Cancel', style: 'cancel' },
+                                { text: 'Proceed', onPress: proceed }
+                              ]
+                            );
+                          } else {
+                            await proceed();
+                          }
+                        };
+                        selectStore();
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+                        <Text style={[styles.langText, isSelected && styles.activeLangText, { fontWeight: '700' }]}>
+                          {item.name}
+                        </Text>
+                        {isSelected && <Ionicons name="checkmark-circle" size={20} color="#7c3aed" />}
+                      </View>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 4 }}>
+                        <Ionicons name="location-sharp" size={13} color="#7c3aed" />
+                        <Text style={{ fontSize: 12, color: '#64748b', flex: 1 }}>{item.address}</Text>
+                      </View>
+                      <Text style={{ fontSize: 11, color: '#94a3b8', marginTop: 2, fontStyle: 'italic' }}>
+                        Delivery within {item.deliveryRadius || 10} km radius
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                }}
+                ListEmptyComponent={
+                  <Text style={{ textAlign: 'center', color: '#64748b', marginVertical: 32 }}>
+                    No product delivery available in your area, sorry.
+                  </Text>
+                }
+              />
+            )}
+
+            {activeStore && (
+              <TouchableOpacity
+                style={[styles.closeBtn, { marginTop: 12 }]}
+                onPress={() => setShowStoreModal(false)}
+              >
+                <Text style={styles.closeBtnText}>Close</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Not Deliverable Popup Modal */}
+      <Modal
+        visible={showNotDeliverablePopup}
+        transparent={true}
+        animationType="none"
+        onRequestClose={() => {
+          setShowNotDeliverablePopup(false);
+        }}
+      >
+        <Animated.View style={[styles.ndOverlay, { opacity: notDeliverableOpacityAnim }]}>
+          <Animated.View style={[styles.ndCard, { transform: [{ scale: notDeliverableScaleAnim }] }]}>
+            {/* Decorative top gradient bar */}
+            <View style={styles.ndTopBar} />
+
+            {/* Location icon circle */}
+            <View style={styles.ndIconCircle}>
+              <Ionicons name="location-sharp" size={36} color="#ef4444" />
+            </View>
+
+            <Text style={styles.ndTitle}>Delivery Not Available</Text>
+            <Text style={styles.ndMessage}>
+              Sorry, we don't deliver to your current location yet.{"\n"}
+              But you can still explore our products!
+            </Text>
+
+            {/* Explore Products Button */}
+            <TouchableOpacity
+              style={styles.ndExploreBtn}
+              activeOpacity={0.85}
+              onPress={() => {
+                Animated.parallel([
+                  Animated.timing(notDeliverableScaleAnim, { toValue: 0.9, duration: 150, useNativeDriver: true }),
+                  Animated.timing(notDeliverableOpacityAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
+                ]).start(() => {
+                  setShowNotDeliverablePopup(false);
+                });
+              }}
+            >
+              <Ionicons name="basket-outline" size={20} color="#ffffff" style={{ marginRight: 8 }} />
+              <Text style={styles.ndExploreBtnText}>Explore Products</Text>
+            </TouchableOpacity>
+
+            {/* Select Store Manually Link */}
+            <TouchableOpacity
+              style={styles.ndSelectStoreBtn}
+              activeOpacity={0.7}
+              onPress={async () => {
+                setShowNotDeliverablePopup(false);
+                await fetchAllStores();
+                setShowStoreModal(true);
+              }}
+            >
+              <Ionicons name="storefront-outline" size={16} color="#7c3aed" style={{ marginRight: 6 }} />
+              <Text style={styles.ndSelectStoreText}>Select Store Manually</Text>
+            </TouchableOpacity>
+          </Animated.View>
+        </Animated.View>
+      </Modal>
     </View>
   );
 }
@@ -1222,7 +1677,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  blinkImg: { width: '85%', height: '85%', resizeMode: 'contain' },
+  blinkImg: { width: 110, height: 110, resizeMode: 'contain' },
   blinkImgPlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   blinkDiscBadge: {
     position: 'absolute',
@@ -1368,6 +1823,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
+    zIndex: 2000,
   },
   modalContent: {
     width: '80%',
@@ -1461,6 +1917,133 @@ const styles = StyleSheet.create({
     height: 4,
     borderRadius: 2,
     backgroundColor: '#a855f7',
+  },
+
+  // ═══ Not Deliverable Popup Styles ═══
+  ndOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  ndCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 24,
+    width: '100%',
+    maxWidth: 360,
+    alignItems: 'center',
+    paddingBottom: 28,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.25,
+    shadowRadius: 24,
+    elevation: 20,
+  },
+  ndTopBar: {
+    width: '100%',
+    height: 6,
+    backgroundColor: '#ef4444',
+  },
+  ndIconCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: '#fef2f2',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 28,
+    marginBottom: 16,
+    borderWidth: 3,
+    borderColor: '#fecaca',
+  },
+  ndTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#0f172a',
+    marginBottom: 10,
+    letterSpacing: -0.3,
+  },
+  ndMessage: {
+    fontSize: 14,
+    color: '#64748b',
+    textAlign: 'center',
+    lineHeight: 21,
+    paddingHorizontal: 28,
+    marginBottom: 28,
+  },
+  ndExploreBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#7c3aed',
+    paddingVertical: 14,
+    paddingHorizontal: 32,
+    borderRadius: 14,
+    marginHorizontal: 28,
+    width: '80%',
+    shadowColor: '#7c3aed',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  ndExploreBtnText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  ndSelectStoreBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 16,
+    paddingVertical: 8,
+  },
+  ndSelectStoreText: {
+    color: '#7c3aed',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+
+  // ═══ Not Deliverable Reminder Banner ═══
+  notDeliverableBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#fffbeb',
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 4,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#fde68a',
+  },
+  notDeliverableBannerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 8,
+  },
+  notDeliverableBannerText: {
+    fontSize: 12.5,
+    color: '#92400e',
+    fontWeight: '600',
+    flex: 1,
+  },
+  notDeliverableBannerAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    marginLeft: 8,
+  },
+  notDeliverableBannerActionText: {
+    fontSize: 12.5,
+    color: '#b45309',
+    fontWeight: '700',
   },
 });
 
