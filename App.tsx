@@ -12,9 +12,9 @@ enableScreens();
 
 SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
-// Safety timeout: force-hide splash screen after 15 seconds no matter what.
+// Safety timeout: force-hide splash screen after 5 seconds no matter what.
 // Prevents the app from appearing permanently frozen if data loading fails.
-const SPLASH_SAFETY_TIMEOUT_MS = 15000;
+const SPLASH_SAFETY_TIMEOUT_MS = 5000;
 
 export default function App() {
   useEffect(() => {

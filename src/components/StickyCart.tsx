@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useLanguage } from '../hooks/useLanguage';
 
 type StickyCartProps = {
   totalItems: number;
@@ -17,6 +18,7 @@ export default function StickyCart({
   tintColor = '#7c3aed',
   bottom,
 }: StickyCartProps) {
+  const { language, t } = useLanguage();
   if (totalItems <= 0) {
     return null;
   }
@@ -36,13 +38,15 @@ export default function StickyCart({
             </View>
           </View>
           <View style={styles.summary}>
-            <Text style={[styles.label, { color: tintColor }]}>Cart</Text>
+            <Text style={[styles.label, { color: tintColor }]}>{t('cart') || 'Cart'}</Text>
             <Text style={styles.totalText}>₹{cartTotal}</Text>
           </View>
         </View>
 
         <View style={[styles.action, { backgroundColor: `${tintColor}12` }]}> 
-          <Text style={[styles.actionText, { color: tintColor }]}>Open</Text>
+          <Text style={[styles.actionText, { color: tintColor }]}>
+            {language === 'mr' ? 'उघडा' : language === 'hi' ? 'खोलें' : 'Open'}
+          </Text>
           <Ionicons name="chevron-forward" size={11} color={tintColor} />
         </View>
       </TouchableOpacity>

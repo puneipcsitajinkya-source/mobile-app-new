@@ -21,6 +21,7 @@ import { useCart } from '../hooks/useCart';
 import { useLanguage } from '../hooks/useLanguage';
 import { useNetwork } from '../hooks/useNetwork';
 import { Ionicons } from '@expo/vector-icons';
+import PremiumTabIcon from '../components/PremiumTabIcon';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type Props = {
@@ -49,11 +50,17 @@ interface Category {
   icon: string;
   image?: string;
   images?: string[];
+  mainCategory?: string;
+  mainCategoryIcon?: string;
 }
 
 const { width } = Dimensions.get('window');
 const PROMO_WIDTH = width - 48;
 const APP_LOGO = require('../../assets/icon.png');
+
+const STORAGE_CACHED_PRODUCTS = '@cached_home_products';
+const STORAGE_CACHED_CATEGORIES = '@cached_home_categories';
+const STORAGE_CACHED_BANNERS = '@cached_home_banners';
 
 const PROMO_ITEMS = [
   {
@@ -79,14 +86,26 @@ const PROMO_ITEMS = [
   },
 ];
 
-const SEARCH_PLACEHOLDERS = [
-  'Search "milk"',
-  'Search "rice"',
-  'Search "bread"',
-  'Search "vegetables"',
-  'Search "fruits"',
-  'Search "snacks"',
-];
+const SEARCH_PLACEHOLDERS: Record<string, string[]> = {
+  en: [
+    'Search for atta, dal, coke and ...',
+    'Search "milk, bread & eggs"',
+    'Search "fresh vegetables & fruits"',
+    'Search "chips, drinks & snacks"',
+  ],
+  mr: [
+    'आटा, डाळ, पेय शोधा...',
+    '"दूध, ब्रेड आणि अंडी" शोधा',
+    '"ताजी फळे आणि भाज्या" शोधा',
+    '"चिप्स, पेये आणि स्नॅक्स" शोधा',
+  ],
+  hi: [
+    'आटा, दाल, ड्रिंक्स खोजें...',
+    '"दूध, ब्रेड और अंडे" खोजें',
+    '"ताजे फल और सब्जियां" खोजें',
+    '"चिप्स, ड्रिंक्स और स्नैक्स" खोजें',
+  ],
+};
 
 interface ProductCardProps {
   item: Product;
@@ -96,6 +115,7 @@ interface ProductCardProps {
   onIncrement: (productId: string) => void;
   onDecrement: (productId: string) => void;
   productLabel: string;
+  addText?: string;
   compact?: boolean;
 }
 
@@ -108,6 +128,7 @@ const ProductCard = memo(function ProductCard({
   onIncrement,
   onDecrement,
   productLabel,
+  addText,
   compact = false,
 }: ProductCardProps) {
   const hasDiscount = item.mrp != null && item.mrp > item.price;
@@ -118,18 +139,6 @@ const ProductCard = memo(function ProductCard({
   const [activeIdx, setActiveIdx] = useState(0);
   const cardWidth = compact ? 148 : 160;
   const scrollViewRef = useRef<ScrollView>(null);
-
-  useEffect(() => {
-    if (!item.images || item.images.length <= 1) return;
-    const interval = setInterval(() => {
-      setActiveIdx((prev) => {
-        const next = (prev + 1) % item.images!.length;
-        scrollViewRef.current?.scrollTo({ x: next * cardWidth, animated: true });
-        return next;
-      });
-    }, 4000);
-    return () => clearInterval(interval);
-  }, [item.images, cardWidth]);
 
   const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const scrollPosition = event.nativeEvent.contentOffset.x;
@@ -223,7 +232,7 @@ const ProductCard = memo(function ProductCard({
             </View>
           ) : (
             <TouchableOpacity style={styles.blinkAddBtn} onPress={() => onAdd(item)} activeOpacity={0.8}>
-              <Text style={styles.blinkAddText}>ADD</Text>
+              <Text style={styles.blinkAddText}>{addText || 'ADD'}</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -255,6 +264,7 @@ export default function HomeScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [selectedMainTab, setSelectedMainTab] = useState<string>('all');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -311,164 +321,75 @@ export default function HomeScreen({ navigation }: Props) {
     return undefined; // Modal is open, load() will be called when user selects a store
   };
 
-  const checkLocationAndResolveStore = async (): Promise<string | undefined> => {
+  const checkLocationAndResolveStore = async (isManual = false): Promise<string | undefined> => {
     setLocLoading(true);
     try {
       // 1. Check if location services are enabled
-      let servicesEnabled = await Location.hasServicesEnabledAsync();
-      while (!servicesEnabled) {
-        if (Platform.OS === 'android') {
-          try {
-            await Location.enableNetworkProviderAsync();
-            servicesEnabled = await Location.hasServicesEnabledAsync();
-          } catch (enableErr) {
-            console.log('Error enabling network provider:', enableErr);
-          }
+      const servicesEnabled = await Location.hasServicesEnabledAsync().catch(() => false);
+      if (!servicesEnabled) {
+        if (isManual) {
+          Alert.alert('Location Services Required', 'Please turn on Location Services to automatically find the nearest store.');
         }
-        
-        if (!servicesEnabled) {
-          const retry = await new Promise<boolean>((resolve) => {
-            Alert.alert(
-              'Location Services Required',
-              'Please turn on Location Services on your device to automatically find the nearest store.',
-              [
-                { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-                { text: 'Try Again', onPress: () => resolve(true) }
-              ]
-            );
-          });
-          if (!retry) {
-            const fallbackId = await handleFallbackStore();
-            setLocLoading(false);
-            return fallbackId;
-          }
-        }
-      }
-
-      // 2. Request / check permission
-      let { status, canAskAgain } = await Location.requestForegroundPermissionsAsync();
-      while (status !== 'granted') {
-        const retry = await new Promise<boolean>((resolve) => {
-          if (!canAskAgain) {
-            Alert.alert(
-              'Location Permission Required',
-              'Location permission is required to find your nearest store. Please enable it in device settings.',
-              [
-                { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-                { text: 'Open Settings', onPress: () => { Linking.openSettings(); resolve(false); } },
-                { text: 'Try Again', onPress: () => resolve(true) }
-              ]
-            );
-          } else {
-            Alert.alert(
-              'Location Permission Required',
-              'Location permission is required to find your nearest store.',
-              [
-                { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-                { text: 'Try Again', onPress: () => resolve(true) }
-              ]
-            );
-          }
-        });
-
-        if (!retry) {
-          const fallbackId = await handleFallbackStore();
-          setLocLoading(false);
-          return fallbackId;
-        }
-
-        const reqResult = await Location.requestForegroundPermissionsAsync();
-        status = reqResult.status;
-        canAskAgain = reqResult.canAskAgain;
-      }
-
-      // 3. Try last known position first (quick fallback)
-      const lastKnown = await Location.getLastKnownPositionAsync({});
-      if (lastKnown) {
-        console.log(`[GPS] Found lastKnown coordinates: lat=${lastKnown.coords.latitude}, lng=${lastKnown.coords.longitude}`);
-        const nearestRes = await findNearestStore(lastKnown.coords.latitude, lastKnown.coords.longitude);
-        console.log(`[GPS] Nearest store response for lastKnown: distance=${nearestRes.data?.distance}km, isServiceable=${nearestRes.data?.isServiceable}`);
-        if (nearestRes.data && nearestRes.data.store && nearestRes.data.isServiceable) {
-          const store = nearestRes.data.store;
-          await AsyncStorage.setItem('active_store', JSON.stringify(store));
-          setActiveStore(store);
-          console.log(`[GPS] Store resolved from lastKnown: ${store.name} (${store._id}), distance=${nearestRes.data.distance}km`);
-          return store._id;
-        }
-      }
-
-      // 4. Helper to fetch location with timeout (exactly like CheckoutScreen)
-      const fetchLocation = async (accuracy: number, timeoutMs: number) => {
-        try {
-          console.log(`[GPS] Requesting fresh location with accuracy level: ${accuracy}...`);
-          return await Promise.race([
-            Location.getCurrentPositionAsync({ accuracy }),
-            new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
-          ]);
-        } catch (e) {
-          console.warn(`[GPS] Location fetch (${accuracy}) failed:`, e);
-          return null;
-        }
-      };
-
-      // Attempt low accuracy first, then balanced if needed
-      let fresh = await fetchLocation(Location.Accuracy.Low, 3000);
-      if (!fresh) {
-        console.log('[GPS] Low accuracy location request timed out. Falling back to Balanced accuracy...');
-        fresh = await fetchLocation(Location.Accuracy.Balanced, 5000);
-      }
-
-      if (fresh) {
-        console.log(`[GPS] Resolved fresh coordinates: lat=${fresh.coords.latitude}, lng=${fresh.coords.longitude}`);
-        const nearestRes = await findNearestStore(fresh.coords.latitude, fresh.coords.longitude);
-        console.log(`[GPS] Nearest store response for fresh: distance=${nearestRes.data?.distance}km, isServiceable=${nearestRes.data?.isServiceable}`);
-        if (nearestRes.data && nearestRes.data.store && nearestRes.data.isServiceable) {
-          const store = nearestRes.data.store;
-          await AsyncStorage.setItem('active_store', JSON.stringify(store));
-          setActiveStore(store);
-          console.log(`[GPS] Store resolved from fresh GPS: ${store.name} (${store._id}), distance=${nearestRes.data.distance}km`);
-          return store._id;
-        }
-      } else {
-        console.log('[GPS] Failed to retrieve fresh coordinates (request timed out or failed).');
-      }
-
-      // If fresh location is not available or not serviceable:
-      // Show styled popup instead of plain Alert
-      setIsNotDeliverable(true);
-      setShowNotDeliverablePopup(true);
-      // Animate popup in
-      notDeliverableScaleAnim.setValue(0);
-      notDeliverableOpacityAnim.setValue(0);
-      Animated.parallel([
-        Animated.spring(notDeliverableScaleAnim, { toValue: 1, useNativeDriver: true, tension: 280, friction: 12 }),
-        Animated.timing(notDeliverableOpacityAnim, { toValue: 1, duration: 250, useNativeDriver: true }),
-      ]).start();
-      // Hide loading and splash so products are visible behind the popup
-      setLoading(false);
-      SplashScreen.hideAsync().catch(() => undefined);
-      return undefined; // No store selected, user browses all products
-    } catch (err: any) {
-      console.log('Error resolving nearest store via location:', err);
-      const errMsg = err?.message || JSON.stringify(err) || String(err);
-      
-      const retry = await new Promise<boolean>((resolve) => {
-        Alert.alert(
-          'Location Error',
-          `Could not retrieve location/store.\n\nDetails: ${errMsg}\n\nWould you like to try again or select a store manually?`,
-          [
-            { text: 'Select Store', style: 'cancel', onPress: () => resolve(false) },
-            { text: 'Try Again', onPress: () => resolve(true) }
-          ],
-          { cancelable: false }
-        );
-      });
-      
-      if (retry) {
-        checkLocationAndResolveStore();
-      } else {
         return await handleFallbackStore();
       }
+
+      // 2. Check / request foreground permission
+      let perm = await Location.getForegroundPermissionsAsync().catch(() => null);
+      if (!perm || perm.status !== 'granted') {
+        perm = await Location.requestForegroundPermissionsAsync().catch(() => null);
+      }
+      if (!perm || perm.status !== 'granted') {
+        if (isManual) {
+          Alert.alert('Location Permission Required', 'Location permission is required to find your nearest store.');
+        }
+        return await handleFallbackStore();
+      }
+
+      // 3. Try last known position first (super fast, <50ms)
+      const lastKnown = await Location.getLastKnownPositionAsync({}).catch(() => null);
+      if (lastKnown?.coords) {
+        console.log(`[GPS] Found lastKnown coordinates: lat=${lastKnown.coords.latitude}, lng=${lastKnown.coords.longitude}`);
+        const nearestRes = await findNearestStore(lastKnown.coords.latitude, lastKnown.coords.longitude).catch(() => null);
+        if (nearestRes?.data?.store && nearestRes.data.isServiceable) {
+          const store = nearestRes.data.store;
+          await AsyncStorage.setItem('active_store', JSON.stringify(store));
+          setActiveStore(store);
+          setIsNotDeliverable(false);
+          setShowNotDeliverablePopup(false);
+          console.log(`[GPS] Store resolved from lastKnown: ${store.name} (${store._id})`);
+          return store._id;
+        }
+      }
+
+      // 4. Try fresh location with a fast 2.5-second timeout (never blocks startup)
+      const fresh: any = await Promise.race([
+        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Low }).catch(() => null),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500)),
+      ]);
+
+      if (fresh?.coords) {
+        console.log(`[GPS] Resolved fresh coordinates: lat=${fresh.coords.latitude}, lng=${fresh.coords.longitude}`);
+        const nearestRes = await findNearestStore(fresh.coords.latitude, fresh.coords.longitude).catch(() => null);
+        if (nearestRes?.data?.store && nearestRes.data.isServiceable) {
+          const store = nearestRes.data.store;
+          await AsyncStorage.setItem('active_store', JSON.stringify(store));
+          setActiveStore(store);
+          setIsNotDeliverable(false);
+          setShowNotDeliverablePopup(false);
+          console.log(`[GPS] Store resolved from fresh GPS: ${store.name} (${store._id})`);
+          return store._id;
+        }
+      }
+
+      // If location outside delivery area or GPS timed out
+      if (isManual) {
+        setIsNotDeliverable(true);
+        setShowNotDeliverablePopup(true);
+      }
+      return await handleFallbackStore();
+    } catch (err: any) {
+      console.warn('Error resolving nearest store via location:', err);
+      return await handleFallbackStore();
     } finally {
       setLocLoading(false);
     }
@@ -498,114 +419,161 @@ export default function HomeScreen({ navigation }: Props) {
         getCategories(params),
         getSettings(params).catch(() => ({ data: null })),
       ]);
-      setProducts(prodRes.data);
-      setCategories(catRes.data);
+
+      const visibleCats: Category[] = catRes?.data || [];
+      const visibleCatSet = new Set(
+        visibleCats.map((c) => (c.name || '').trim().toLowerCase())
+      );
+
+      // Only retain products belonging to visible categories
+      const activeProducts = (prodRes?.data || []).filter((p: Product) => {
+        const cat = (p.category || '').trim().toLowerCase();
+        return visibleCatSet.has(cat);
+      });
+
+      setProducts(activeProducts);
+      setCategories(visibleCats);
+
+      // Cache products & categories in local storage for instant launch next time
+      if (activeProducts.length > 0) {
+        AsyncStorage.setItem(STORAGE_CACHED_PRODUCTS, JSON.stringify(activeProducts)).catch(() => {});
+      }
+      if (visibleCats.length > 0) {
+        AsyncStorage.setItem(STORAGE_CACHED_CATEGORIES, JSON.stringify(visibleCats)).catch(() => {});
+      }
 
       if (settingsRes && settingsRes.data) {
         const data = settingsRes.data;
-        if (data.banners && data.banners.length > 0) {
-          setSliderBanners(data.banners);
-        } else {
-          setSliderBanners([
-            {
-              title: data.sliderTitle1 || 'Upto 50% Off Today',
-              subtitle: data.sliderSubtitle1 || 'Get amazing discounts on all premium groceries & daily essentials',
-              badge: data.sliderBadge1 || 'BEST OFFER',
-              image: data.sliderImage1 || 'https://images.unsplash.com/photo-1506617498300-38435a0950e8?w=800&q=80',
-              backgroundColor: '#a21caf',
-            },
-            {
-              title: data.sliderTitle2 || 'Low Price Guaranteed',
-              subtitle: data.sliderSubtitle2 || 'Unbeatable prices on fresh vegetables, milk, bread & eggs',
-              badge: data.sliderBadge2 || 'LOWEST PRICE',
-              image: data.sliderImage2 || 'https://images.unsplash.com/photo-1588964895597-cfccd6e2dbf9?w=800&q=80',
-              backgroundColor: '#15803d',
-            },
-            {
-              title: data.sliderTitle3 || 'Mega Savings Week',
-              subtitle: data.sliderSubtitle3 || 'Save big on your monthly grocery list with super saver packs',
-              badge: data.sliderBadge3 || 'SUPER VALUE',
-              image: data.sliderImage3 || 'https://images.unsplash.com/photo-1607349913338-fca6f7fc42d0?w=800&q=80',
-              backgroundColor: '#ea580c',
-            },
-          ]);
-        }
+        const validBanners = (data.banners || []).filter(
+          (b: any) => !b.isCheckoutNotice && b.title !== 'CheckoutNotice' && (b.image || b.title)
+        );
+        const bannersToUse = validBanners.length > 0 ? validBanners : [
+          {
+            title: data.sliderTitle1 || 'Upto 50% Off Today',
+            subtitle: data.sliderSubtitle1 || 'Get amazing discounts on all premium groceries & daily essentials',
+            badge: data.sliderBadge1 || 'BEST OFFER',
+            image: data.sliderImage1 || 'https://images.unsplash.com/photo-1506617498300-38435a0950e8?w=800&q=80',
+            backgroundColor: '#a21caf',
+          },
+          {
+            title: data.sliderTitle2 || 'Low Price Guaranteed',
+            subtitle: data.sliderSubtitle2 || 'Unbeatable prices on fresh vegetables, milk, bread & eggs',
+            badge: data.sliderBadge2 || 'LOWEST PRICE',
+            image: data.sliderImage2 || 'https://images.unsplash.com/photo-1588964895597-cfccd6e2dbf9?w=800&q=80',
+            backgroundColor: '#15803d',
+          },
+          {
+            title: data.sliderTitle3 || 'Mega Savings Week',
+            subtitle: data.sliderSubtitle3 || 'Save big on your monthly grocery list with super saver packs',
+            badge: data.sliderBadge3 || 'SUPER VALUE',
+            image: data.sliderImage3 || 'https://images.unsplash.com/photo-1607349913338-fca6f7fc42d0?w=800&q=80',
+            backgroundColor: '#ea580c',
+          },
+        ];
+        setSliderBanners(bannersToUse);
+        AsyncStorage.setItem(STORAGE_CACHED_BANNERS, JSON.stringify(bannersToUse)).catch(() => {});
       }
     } catch (e) {
       console.error(e);
     } finally {
-      // Fix 4: Removed artificial 600ms delay — show content immediately
       SplashScreen.hideAsync().catch(() => undefined);
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
-  // Fix 7: Prefetch images AFTER content is displayed (runs when products/categories change)
+  // Prefetch top images gently in background after screen is active
   useEffect(() => {
     if (loading || products.length === 0) return;
 
-    // Prefetch product images in background (fire-and-forget, doesn't block UI)
-    products.slice(0, 15).forEach((p: Product) => {
-      const resolved = resolveMediaUrl(p.image);
-      if (resolved && (resolved.startsWith('http://') || resolved.startsWith('https://'))) {
-        Image.prefetch(resolved).catch(() => {});
-      }
-    });
+    const timer = setTimeout(() => {
+      // Prefetch only the top 6 visible hero product images
+      products.slice(0, 6).forEach((p: Product) => {
+        const resolved = resolveMediaUrl(p.image);
+        if (resolved && (resolved.startsWith('http://') || resolved.startsWith('https://'))) {
+          Image.prefetch(resolved).catch(() => {});
+        }
+      });
+    }, 1500);
 
-    // Prefetch category images in background
-    categories.forEach((c: Category) => {
-      const resolved = resolveMediaUrl(c.image);
-      if (resolved && (resolved.startsWith('http://') || resolved.startsWith('https://'))) {
-        Image.prefetch(resolved).catch(() => {});
-      }
-    });
-  }, [loading, products, categories]);
+    return () => clearTimeout(timer);
+  }, [loading, products]);
 
-  // Parallelize location + data loading aggressively.
-  // ALWAYS start loading data immediately — don't wait for GPS.
-  // If no saved store, load ALL products first, then reload with correct store when GPS resolves.
+  // Instant offline-first startup: render cached data immediately (<30ms)
   useEffect(() => {
     const startup = async () => {
-      // Hide native splash immediately — show our animated PremiumLoader instead.
-      // The PremiumLoader provides much better visual feedback than a static splash image.
-      SplashScreen.hideAsync().catch(() => undefined);
-
-      // Check if we have a saved store
-      const savedStore = await AsyncStorage.getItem('active_store');
       let quickLoadStoreId: string | undefined;
+      let hasCachedContent = false;
 
-      if (savedStore) {
-        try {
-          const parsed = JSON.parse(savedStore);
-          quickLoadStoreId = parsed._id;
-          setActiveStore(parsed);
-        } catch (e) {
-          await AsyncStorage.removeItem('active_store');
+      // 1. FAST PATH: Read cached data immediately from local storage
+      try {
+        const [savedStoreStr, cachedProdStr, cachedCatStr, cachedBannersStr] = await Promise.all([
+          AsyncStorage.getItem('active_store'),
+          AsyncStorage.getItem(STORAGE_CACHED_PRODUCTS),
+          AsyncStorage.getItem(STORAGE_CACHED_CATEGORIES),
+          AsyncStorage.getItem(STORAGE_CACHED_BANNERS),
+        ]);
+
+        if (savedStoreStr) {
+          try {
+            const parsed = JSON.parse(savedStoreStr);
+            quickLoadStoreId = parsed._id;
+            setActiveStore(parsed);
+          } catch (e) {
+            await AsyncStorage.removeItem('active_store');
+          }
         }
+
+        if (cachedCatStr) {
+          try {
+            const parsedCats = JSON.parse(cachedCatStr);
+            if (Array.isArray(parsedCats) && parsedCats.length > 0) {
+              setCategories(parsedCats);
+              hasCachedContent = true;
+            }
+          } catch (e) {}
+        }
+
+        if (cachedProdStr) {
+          try {
+            const parsedProds = JSON.parse(cachedProdStr);
+            if (Array.isArray(parsedProds) && parsedProds.length > 0) {
+              setProducts(parsedProds);
+              hasCachedContent = true;
+            }
+          } catch (e) {}
+        }
+
+        if (cachedBannersStr) {
+          try {
+            const parsedBanners = JSON.parse(cachedBannersStr);
+            if (Array.isArray(parsedBanners) && parsedBanners.length > 0) {
+              setSliderBanners(parsedBanners);
+            }
+          } catch (e) {}
+        }
+
+        // If we have cached content, show UI immediately! (0ms wait, no spinner!)
+        if (hasCachedContent) {
+          setLoading(false);
+          SplashScreen.hideAsync().catch(() => undefined);
+        }
+      } catch (err) {
+        console.warn('Initial cache read error:', err);
       }
 
-      // Start loading data RIGHT NOW — don't wait for GPS
-      // If we have a saved store, use it. Otherwise load without store filter (all products).
-      console.log(`[Startup] Quick-loading data ${quickLoadStoreId ? `for saved store ${quickLoadStoreId}` : '(all products, no store filter)'}`);
+      // 2. Fetch fresh data in the background from backend (non-blocking)
       load(quickLoadStoreId);
 
-      // Resolve location in background
-      const resolvedStoreId = await checkLocationAndResolveStore();
-
-      if (resolvedStoreId) {
-        // If location resolved to a DIFFERENT store than what we quick-loaded, reload
-        if (resolvedStoreId !== quickLoadStoreId) {
-          console.log('[Startup] Store changed after location resolve, reloading with new store...');
-          setRefreshing(true);
-          load(resolvedStoreId);
-        }
+      // 3. Location handling: ONLY if no store is saved yet!
+      // If user already has an active store, DO NOT delay or show GPS prompts!
+      if (!quickLoadStoreId) {
+        checkLocationAndResolveStore();
       }
-      // If no store resolved (modal is open), load() will be called when user selects a store
     };
 
     startup();
-  }, []);
+  }, [load]);
 
   useEffect(() => {
     const unsubscribe = onReconnect(() => {
@@ -625,13 +593,105 @@ export default function HomeScreen({ navigation }: Props) {
     });
   }, [categories]);
 
+  // ─── 3-Tier Main Category Tabs & Grouped Sections ────────────────────────
+  const mainTabs = useMemo(() => {
+    const tabMap = new Map<string, string>();
+
+    // Dynamically build active tabs from categories in the store
+    uniqueCategories.forEach((cat) => {
+      const main = (cat.mainCategory || 'Grocery & Kitchen').trim();
+      if (!main) return;
+      if (!tabMap.has(main)) {
+        const defaultIcon =
+          main === 'Grocery & Kitchen' ? '🥦' :
+          main === 'Snacks & Drinks' ? '🍿' :
+          main === 'Beauty & Personal Care' ? '💄' :
+          main === 'Electronics' ? '🎧' :
+          main === 'Gifting & Lifestyle' ? '🎁' : '🏷️';
+        tabMap.set(main, (cat.mainCategoryIcon || '').trim() || defaultIcon);
+      } else if (cat.mainCategoryIcon?.trim()) {
+        tabMap.set(main, cat.mainCategoryIcon.trim());
+      }
+    });
+
+    // Ensure fallback if store has no categories yet
+    if (tabMap.size === 0) {
+      tabMap.set('Grocery & Kitchen', '🥦');
+    }
+
+    const list: { key: string; name: string; icon: string }[] = [
+      { key: 'all', name: 'All', icon: '🛒' },
+    ];
+    tabMap.forEach((icon, name) => {
+      list.push({ key: name, name, icon });
+    });
+    return list;
+  }, [uniqueCategories]);
+
+  const mainCategorySections = useMemo(() => {
+    if (search.trim()) return [];
+
+    const groupMap = new Map<string, { icon: string; items: Category[] }>();
+
+    ['Grocery & Kitchen', 'Snacks & Drinks', 'Beauty & Personal Care', 'Electronics', 'Gifting & Lifestyle'].forEach((m) => {
+      groupMap.set(m, { icon: '', items: [] });
+    });
+
+    // Build a quick lookup of tab icons
+    const tabIconMap = new Map<string, string>();
+    mainTabs.forEach((t) => tabIconMap.set(t.name, t.icon));
+
+    uniqueCategories.forEach((cat) => {
+      const main = (cat.mainCategory || 'Grocery & Kitchen').trim();
+      const icon = (cat.mainCategoryIcon || '').trim() || tabIconMap.get(main) || '🥦';
+      if (!groupMap.has(main)) {
+        groupMap.set(main, { icon, items: [] });
+      }
+      const g = groupMap.get(main)!;
+      if (cat.mainCategoryIcon?.trim()) {
+        g.icon = cat.mainCategoryIcon.trim();
+      } else if (!g.icon) {
+        g.icon = icon;
+      }
+      g.items.push(cat);
+    });
+
+    const sections: { mainCategory: string; icon: string; categories: Category[] }[] = [];
+    groupMap.forEach(({ icon, items }, mainCat) => {
+      if (items.length > 0) {
+        if (selectedMainTab === 'all' || selectedMainTab === mainCat) {
+          sections.push({
+            mainCategory: mainCat,
+            icon: icon || tabIconMap.get(mainCat) || '🥦',
+            categories: items,
+          });
+        }
+      }
+    });
+
+    return sections;
+  }, [uniqueCategories, selectedMainTab, search, mainTabs]);
+
   const productsByCategory = useMemo(() => {
+    const visibleCategorySet = new Set(
+      uniqueCategories.map((c) => (c.name || '').trim().toLowerCase())
+    );
+
+    // Only allow products from visible categories
+    const visibleProducts = products.filter((p) => {
+      const cat = (p.category || '').trim().toLowerCase();
+      return visibleCategorySet.has(cat);
+    });
+
     if (search.trim()) {
-      const lower = search.toLowerCase();
-      const filtered = products.filter(p => {
+      const lower = search.toLowerCase().trim();
+      const filtered = visibleProducts.filter(p => {
         const nameObj = p.name;
         if (typeof nameObj === 'object') {
-          return nameObj.en.toLowerCase().includes(lower) || nameObj.mr.toLowerCase().includes(lower);
+          return (
+            (nameObj.en && nameObj.en.toLowerCase().includes(lower)) ||
+            (nameObj.mr && nameObj.mr.toLowerCase().includes(lower))
+          );
         }
         return String(nameObj).toLowerCase().includes(lower);
       });
@@ -640,14 +700,18 @@ export default function HomeScreen({ navigation }: Props) {
         : [];
     }
 
-    return uniqueCategories.map(cat => ({
+    const eligibleCategories = selectedMainTab === 'all'
+      ? uniqueCategories
+      : uniqueCategories.filter(c => (c.mainCategory || 'Grocery & Kitchen') === selectedMainTab);
+
+    return eligibleCategories.map(cat => ({
       category: cat,
-      products: products.filter(p => (p.category || '').toLowerCase() === cat.name.toLowerCase())
+      products: visibleProducts.filter(p => (p.category || '').trim().toLowerCase() === cat.name.trim().toLowerCase())
     })).filter(group => group.products.length > 0);
-  }, [products, uniqueCategories, search]);
+  }, [products, uniqueCategories, search, selectedMainTab]);
 
   const handleAdd = useCallback((product: Product) => {
-    addToCart({ _id: product._id, name: product.name, price: product.price, image: product.image, mrp: product.mrp });
+    addToCart({ _id: product._id, name: product.name, price: product.price, image: product.image, mrp: product.mrp, category: product.category });
   }, [addToCart]);
 
   const handleProductPress = useCallback((productId: string) => {
@@ -728,16 +792,16 @@ export default function HomeScreen({ navigation }: Props) {
   // ═══════════════════════════════════════════
   //  ADVANCED SEARCH BAR ANIMATIONS
   // ═══════════════════════════════════════════
-  const searchScaleAnim    = useRef(new Animated.Value(1)).current;
-  const searchGlowAnim     = useRef(new Animated.Value(0)).current;
-  const searchGlowPulse    = useRef(new Animated.Value(1)).current;
-  const clearBtnAnim       = useRef(new Animated.Value(0)).current;
-  const placeholderSlide   = useRef(new Animated.Value(0)).current;   // 0=visible, -14=slide up
+  const searchScaleAnim = useRef(new Animated.Value(1)).current;
+  const searchGlowAnim = useRef(new Animated.Value(0)).current;
+  const searchGlowPulse = useRef(new Animated.Value(1)).current;
+  const clearBtnAnim = useRef(new Animated.Value(0)).current;
+  const placeholderSlide = useRef(new Animated.Value(0)).current;   // 0=visible, -14=slide up
   const placeholderOpacity = useRef(new Animated.Value(1)).current;
-  const iconBounceAnim     = useRef(new Animated.Value(0)).current;   // 0 = normal, 1 = bounced
-  const shimmerAnim        = useRef(new Animated.Value(-1)).current;  // sweeps -1 → 2
+  const iconBounceAnim = useRef(new Animated.Value(0)).current;   // 0 = normal, 1 = bounced
+  const shimmerAnim = useRef(new Animated.Value(-1)).current;  // sweeps -1 → 2
 
-  const [searchFocused, setSearchFocused]       = useState(false);
+  const [searchFocused, setSearchFocused] = useState(false);
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
 
   // — Shimmer sweep (idle, every 4 s) —
@@ -762,13 +826,14 @@ export default function HomeScreen({ navigation }: Props) {
     const id = setInterval(() => {
       // slide up & fade out
       Animated.parallel([
-        Animated.timing(placeholderSlide,   { toValue: -14, duration: 260, easing: Easing.in(Easing.ease), useNativeDriver: true }),
-        Animated.timing(placeholderOpacity, { toValue: 0,   duration: 240, useNativeDriver: true }),
+        Animated.timing(placeholderSlide, { toValue: -14, duration: 260, easing: Easing.in(Easing.ease), useNativeDriver: true }),
+        Animated.timing(placeholderOpacity, { toValue: 0, duration: 240, useNativeDriver: true }),
       ]).start(() => {
-        setPlaceholderIndex(p => (p + 1) % SEARCH_PLACEHOLDERS.length);
+        const currentList = SEARCH_PLACEHOLDERS[language] || SEARCH_PLACEHOLDERS.en;
+        setPlaceholderIndex(p => (p + 1) % currentList.length);
         placeholderSlide.setValue(14);          // reset to slide-in from below
         Animated.parallel([
-          Animated.timing(placeholderSlide,   { toValue: 0, duration: 260, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+          Animated.timing(placeholderSlide, { toValue: 0, duration: 260, easing: Easing.out(Easing.ease), useNativeDriver: true }),
           Animated.timing(placeholderOpacity, { toValue: 1, duration: 260, useNativeDriver: true }),
         ]).start();
       });
@@ -794,11 +859,11 @@ export default function HomeScreen({ navigation }: Props) {
       // spring scale up
       Animated.spring(searchScaleAnim, { toValue: 1.022, useNativeDriver: true, tension: 260, friction: 9 }),
       // glow fade in
-      Animated.timing(searchGlowAnim,  { toValue: 1, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+      Animated.timing(searchGlowAnim, { toValue: 1, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
       // icon bounce: quick up-down
       Animated.sequence([
         Animated.timing(iconBounceAnim, { toValue: -6, duration: 120, easing: Easing.out(Easing.ease), useNativeDriver: true }),
-        Animated.spring(iconBounceAnim, { toValue: 0,  useNativeDriver: true, tension: 400, friction: 7 }),
+        Animated.spring(iconBounceAnim, { toValue: 0, useNativeDriver: true, tension: 400, friction: 7 }),
       ]),
     ]).start();
     // start glow pulse loop
@@ -814,9 +879,9 @@ export default function HomeScreen({ navigation }: Props) {
     setSearchFocused(false);
     searchGlowPulse.stopAnimation();
     Animated.parallel([
-      Animated.spring(searchScaleAnim, { toValue: 1,  useNativeDriver: true, tension: 260, friction: 9 }),
-      Animated.timing(searchGlowAnim,  { toValue: 0,  duration: 220, easing: Easing.out(Easing.ease), useNativeDriver: true }),
-      Animated.spring(searchGlowPulse, { toValue: 1,  useNativeDriver: true, tension: 200, friction: 8 }),
+      Animated.spring(searchScaleAnim, { toValue: 1, useNativeDriver: true, tension: 260, friction: 9 }),
+      Animated.timing(searchGlowAnim, { toValue: 0, duration: 220, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+      Animated.spring(searchGlowPulse, { toValue: 1, useNativeDriver: true, tension: 200, friction: 8 }),
     ]).start();
   }, [searchScaleAnim, searchGlowAnim, searchGlowPulse]);
 
@@ -838,7 +903,7 @@ export default function HomeScreen({ navigation }: Props) {
       activeOpacity={0.9}
       onPress={() => handleBannerPress(item)}
       style={[styles.promoCard, { width: PROMO_WIDTH, backgroundColor: item.backgroundColor || '#a21caf' }]}
-    > 
+    >
       <PremiumImage
         source={resolveMediaUrl(item.image) ? { uri: resolveMediaUrl(item.image)! } : null}
         style={styles.promoImg}
@@ -859,9 +924,10 @@ export default function HomeScreen({ navigation }: Props) {
       onIncrement={increaseQty}
       onDecrement={decreaseQty}
       productLabel={tProduct(product.name)}
+      addText={language === 'mr' ? 'जोडा' : language === 'hi' ? 'जोड़ें' : 'ADD'}
       compact
     />
-  ), [qtyMap, handleAdd, handleProductPress, tProduct, increaseQty, decreaseQty]);
+  ), [qtyMap, handleAdd, handleProductPress, tProduct, increaseQty, decreaseQty, language]);
 
   const renderCategoryGroup = useCallback(({ item: group }: { item: { category: Category; products: Product[] } }) => {
     // Split products into rows of 2 for the 2-col grid
@@ -874,11 +940,13 @@ export default function HomeScreen({ navigation }: Props) {
         {/* Section header */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>
-            {group.category.name === 'Search Results' ? group.category.name : tCategory(group.category.name)}
+            {group.category.name === 'Search Results' ? (language === 'mr' ? 'शोध निकाल' : language === 'hi' ? 'खोज परिणाम' : 'Search Results') : tCategory(group.category.name)}
           </Text>
           {group.category.name !== 'Search Results' && (
             <TouchableOpacity onPress={() => navigation.navigate('CategoryProducts', { categoryName: group.category.name })}>
-              <Text style={styles.seeAllText}>See all ›</Text>
+              <Text style={styles.seeAllText}>
+                {language === 'mr' ? 'सर्व पहा ›' : language === 'hi' ? 'सभी देखें ›' : 'See all ›'}
+              </Text>
             </TouchableOpacity>
           )}
         </View>
@@ -891,10 +959,10 @@ export default function HomeScreen({ navigation }: Props) {
           keyExtractor={(item) => item._id}
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.blinkHScroll}
-          initialNumToRender={6}
-          maxToRenderPerBatch={6}
-          windowSize={9}
-          removeClippedSubviews
+          initialNumToRender={4}
+          maxToRenderPerBatch={4}
+          windowSize={3}
+          removeClippedSubviews={Platform.OS === 'android'}
           nestedScrollEnabled
           extraData={qtyMap}
         />
@@ -917,11 +985,13 @@ export default function HomeScreen({ navigation }: Props) {
           <View style={styles.notDeliverableBannerLeft}>
             <Ionicons name="location-outline" size={18} color="#b45309" />
             <Text style={styles.notDeliverableBannerText}>
-              Delivery not available at your location
+              {language === 'mr' ? 'तुमच्या पत्त्यावर डिलिव्हरी उपलब्ध नाही' : language === 'hi' ? 'आपके स्थान पर डिलीवरी उपलब्ध नहीं है' : 'Delivery not available at your location'}
             </Text>
           </View>
           <View style={styles.notDeliverableBannerAction}>
-            <Text style={styles.notDeliverableBannerActionText}>Change</Text>
+            <Text style={styles.notDeliverableBannerActionText}>
+              {language === 'mr' ? 'बदला' : language === 'hi' ? 'बदलें' : 'Change'}
+            </Text>
             <Ionicons name="chevron-forward" size={14} color="#b45309" />
           </View>
         </TouchableOpacity>
@@ -958,44 +1028,59 @@ export default function HomeScreen({ navigation }: Props) {
       )}
 
       {!search && (
-        <View style={styles.categoryGridContainer}>
-          {uniqueCategories.map((cat, index) => {
-            const pastelColors = ['#f5f3ff', '#ede9fe', '#f3e8ff', '#fae8ff', '#f5f3ff', '#ede9fe', '#fae8ff', '#f3e8ff'];
-            const bgColor = pastelColors[index % pastelColors.length];
-            return (
-              <TouchableOpacity
-                key={cat._id}
-                style={styles.catGridItem}
-                activeOpacity={0.7}
-                onPress={() => navigation.navigate('CategoryProducts', { categoryName: cat.name })}
-              >
-                <View style={styles.catGridImgContainer}>
-                  <PremiumImage
-                    source={resolveMediaUrl(cat.image) ? { uri: resolveMediaUrl(cat.image)! } : null}
-                    sources={cat.images ? cat.images.map((img: string) => resolveMediaUrl(img) ? { uri: resolveMediaUrl(img)! } : null).filter((x: any) => x !== null) as any[] : []}
-                    style={cat.image ? styles.catGridImg : styles.catGridIconStyle}
-                    categoryName={cat.name}
-                    fallbackEmoji={cat.icon}
-                  />
-                </View>
-                <Text style={styles.catGridText} numberOfLines={2}>{tCategory(cat.name)}</Text>
-              </TouchableOpacity>
-            );
-          })}
+        <View style={styles.mainCategorySectionsContainer}>
+          {mainCategorySections.map((section) => (
+            <View key={section.mainCategory} style={styles.mainCategorySection}>
+              <View style={styles.mainCategoryHeader}>
+                <Text style={styles.mainCategoryTitle}>
+                  {tCategory(section.mainCategory) || section.mainCategory}
+                </Text>
+              </View>
+
+              <View style={styles.blinkCategoryGrid}>
+                {section.categories.map((cat) => (
+                  <TouchableOpacity
+                    key={cat._id}
+                    style={styles.blinkCatCard}
+                    activeOpacity={0.75}
+                    onPress={() => navigation.navigate('CategoryProducts', { categoryName: cat.name })}
+                  >
+                    <View style={styles.blinkCatImgBox}>
+                      <PremiumImage
+                        source={resolveMediaUrl(cat.image) ? { uri: resolveMediaUrl(cat.image)! } : null}
+                        sources={cat.images ? cat.images.map((img: string) => resolveMediaUrl(img) ? { uri: resolveMediaUrl(img)! } : null).filter((x: any) => x !== null) as any[] : []}
+                        style={cat.image ? styles.blinkCatImg : styles.catGridIconStyle}
+                        categoryName={cat.name}
+                        fallbackEmoji={cat.icon || '🥦'}
+                        resizeMode="contain"
+                      />
+                    </View>
+                    <Text style={styles.blinkCatTitle} numberOfLines={2}>
+                      {tCategory(cat.name)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          ))}
         </View>
       )}
     </View>
-  ), [search, uniqueCategories, navigation, tCategory, promoItems, activePromoIndex, isNotDeliverable, showNotDeliverablePopup]);
+  ), [search, uniqueCategories, mainCategorySections, navigation, tCategory, promoItems, activePromoIndex, isNotDeliverable, showNotDeliverablePopup, language]);
 
   const emptyStateComponent = useMemo(() => (
     <View style={styles.emptyState}>
       <View style={styles.emptyIconBox}>
         <Ionicons name="search-outline" size={44} color="#4b5563" />
       </View>
-      <Text style={styles.emptyTitle}>No products found</Text>
-      <Text style={styles.emptySubText}>Try a different keyword or check back later.</Text>
+      <Text style={styles.emptyTitle}>
+        {language === 'mr' ? 'उत्पादने सापडली नाहीत' : language === 'hi' ? 'कोई उत्पाद नहीं मिला' : 'No products found'}
+      </Text>
+      <Text style={styles.emptySubText}>
+        {language === 'mr' ? 'कृपया वेगळा शब्द वापरून पहा किंवा थोड्या वेळाने तपासा.' : language === 'hi' ? 'कृपया कोई अन्य शब्द आज़माएं या बाद में जांचें।' : 'Try a different keyword or check back later.'}
+      </Text>
     </View>
-  ), []);
+  ), [language]);
 
   // During initial load, render the animated premium loader
   if (loading) {
@@ -1093,7 +1178,7 @@ export default function HomeScreen({ navigation }: Props) {
                       },
                     ]}
                   >
-                    {SEARCH_PLACEHOLDERS[placeholderIndex]}
+                    {(SEARCH_PLACEHOLDERS[language] || SEARCH_PLACEHOLDERS.en)[placeholderIndex % (SEARCH_PLACEHOLDERS[language] || SEARCH_PLACEHOLDERS.en).length]}
                   </Animated.Text>
                 </View>
               )}
@@ -1132,6 +1217,35 @@ export default function HomeScreen({ navigation }: Props) {
         </Animated.View>
       </View>
 
+      {/* ═══ TOP MAIN CATEGORY TABS (Blinkit / Zepto Style) ═══ */}
+      {!search && (
+        <View style={styles.topTabsContainer}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.topTabsScrollContent}
+          >
+            {mainTabs.map((tab) => {
+              const isActive = selectedMainTab === tab.key;
+              return (
+                <TouchableOpacity
+                  key={tab.key}
+                  style={[styles.topTabPill, isActive && styles.topTabPillActive]}
+                  activeOpacity={0.7}
+                  onPress={() => setSelectedMainTab(tab.key)}
+                >
+                  <PremiumTabIcon icon={tab.icon} active={isActive} size={15} />
+                  <Text style={[styles.topTabLabel, isActive && styles.topTabLabelActive]}>
+                    {tCategory(tab.name) || tab.name}
+                  </Text>
+                  {isActive && <View style={styles.topTabActiveIndicator} />}
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
+
       <FlatList
         data={productsByCategory}
         keyExtractor={(item) => item.category._id}
@@ -1144,11 +1258,11 @@ export default function HomeScreen({ navigation }: Props) {
         onRefresh={() => { setRefreshing(true); load(); }}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
-        initialNumToRender={5}
-        maxToRenderPerBatch={5}
-        windowSize={9}
-        removeClippedSubviews
-        updateCellsBatchingPeriod={30}
+        initialNumToRender={3}
+        maxToRenderPerBatch={3}
+        windowSize={5}
+        removeClippedSubviews={Platform.OS === 'android'}
+        updateCellsBatchingPeriod={50}
         scrollEventThrottle={16}
       />
 
@@ -1553,59 +1667,112 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     width: 18,
   },
-  // ─── Category grid (top strip) ──────────────────────────────────────────────
-  categoryGridContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    paddingHorizontal: 10,
-    marginBottom: 8,
-  },
-  catGridItem: {
-    width: (width - 20) / 4,
-    alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 3,
-  },
-  catGridImgContainer: {
-    width: (width - 20) / 4 - 16,
-    height: (width - 20) / 4 - 10,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-    marginBottom: 6,
-  },
-  catGridImg: { width: '100%', height: '100%', resizeMode: 'cover' },
-  catGridIcon: { fontSize: 36 },
-  catGridText: {
-    fontSize: 11,
-    color: '#3b0764',
-    fontWeight: '600',
-    textAlign: 'center',
-    lineHeight: 15,
-    paddingHorizontal: 2,
-  },
-  topTabsScroll: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+  // ─── Top Main Category Tabs (Blinkit Style) ─────────────────────────────
+  topTabsContainer: {
     backgroundColor: '#ffffff',
     borderBottomWidth: 1,
     borderBottomColor: '#f1f5f9',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 3,
   },
-  topTabButton: {
-    flexDirection: 'column',
+  topTabsScrollContent: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
     alignItems: 'center',
-    marginRight: 20,
+  },
+  topTabPill: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 14,
     paddingVertical: 4,
+    marginRight: 6,
+    position: 'relative',
+    borderRadius: 8,
+  },
+  topTabPillActive: {
+    backgroundColor: '#f8fafc',
   },
   topTabIcon: {
     fontSize: 22,
-    marginBottom: 4,
+    marginBottom: 2,
   },
   topTabLabel: {
     fontSize: 11,
-    fontWeight: '700',
-    color: '#475569',
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  topTabLabelActive: {
+    color: '#0f172a',
+    fontWeight: '800',
+  },
+  topTabActiveIndicator: {
+    position: 'absolute',
+    bottom: -4,
+    left: 8,
+    right: 8,
+    height: 3,
+    backgroundColor: '#0f172a',
+    borderRadius: 2,
+  },
+
+  // ─── Blinkit-style Grouped Category Sections ────────────────────────────
+  mainCategorySectionsContainer: {
+    paddingTop: 14,
+    backgroundColor: '#ffffff',
+  },
+  mainCategorySection: {
+    marginBottom: 22,
+  },
+  mainCategoryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    marginBottom: 12,
+  },
+  mainCategoryTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#1e293b',
+    letterSpacing: -0.3,
+  },
+  blinkCategoryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 12,
+  },
+  blinkCatCard: {
+    width: (width - 24) / 4,
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    marginBottom: 14,
+  },
+  blinkCatImgBox: {
+    width: (width - 24) / 4 - 8,
+    height: (width - 24) / 4 - 8,
+    backgroundColor: '#eaf6f6', // Exact pale ice cyan/blue from screenshot
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 6,
+    overflow: 'hidden',
+  },
+  blinkCatImg: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'contain',
+  },
+  blinkCatTitle: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#1e293b',
+    textAlign: 'center',
+    marginTop: 6,
+    lineHeight: 14,
+    paddingHorizontal: 2,
   },
   catGridIconStyle: {
     width: '50%',

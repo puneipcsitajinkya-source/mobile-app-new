@@ -93,14 +93,14 @@ export const resolveMediaUrl = (value?: string) => {
   return `${currentBaseUrl}${normalizedPath}`;
 };
 
-export const getProducts = (params?: any) => api.get('/products', { params });
+export const getProducts = (params?: any) => api.get('/products', { params: { showOnApp: true, ...params } });
 export const getProduct = (id: string) => api.get(`/products/${id}`);
 export const getOrder = (id: string) => api.get(`/orders/${id}`);
 export const getSubcategory = (id: string) => api.get(`/subcategories/${id}`);
 export const placeOrder = (data: object) => api.post('/orders', data);
 export const getOrdersByMobile = (mobile: string) => api.get(`/orders/customer/${mobile}`);
 export const getCategories = (params?: any) => api.get('/categories?showOnApp=true', { params });
-export const getSubcategories = (categoryId: string, storeId?: string) => api.get('/subcategories', { params: { categoryId, store: storeId } });
+export const getSubcategories = (categoryId: string, storeId?: string) => api.get('/subcategories', { params: { categoryId, store: storeId, showOnApp: 'true' } });
 export const getSettings = (params?: any) => api.get('/settings', { params });
 export const updateOrderStatus = (id: string, status: string) => api.patch(`/orders/${id}/status`, { status });
 export const submitFeedback = (data: {

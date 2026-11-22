@@ -48,7 +48,7 @@
         "foregroundImage": "./assets/android-icon-foreground.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "versionCode": 16
+      "versionCode": 18
     },
     "web": {
       "favicon": "./assets/favicon.png"

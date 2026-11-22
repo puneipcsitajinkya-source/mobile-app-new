@@ -21,6 +21,7 @@ import { useLanguage } from '../hooks/useLanguage';
 import { useNetwork } from '../hooks/useNetwork';
 import { Ionicons } from '@expo/vector-icons';
 import PremiumLoader from '../components/PremiumLoader';
+import CheckoutDisabledModal from '../components/CheckoutDisabledModal';
 
 const STORAGE_ADDRESS_KEY = '@checkout_address';
 const STORAGE_CONTACT_KEY = '@checkout_contact';
@@ -47,9 +48,11 @@ export default function CheckoutScreen({ navigation }: Props) {
     freeDeliveryThresholdEnabled: false,
     freeDeliveryThreshold: 0,
   });
-  const { t, tProduct } = useLanguage();
+  const { language, t, tProduct } = useLanguage();
   const { isConnected } = useNetwork();
   const [checkoutDisabled, setCheckoutDisabled] = useState(false);
+  const [checkoutDisabledMessage, setCheckoutDisabledMessage] = useState('');
+  const [showDisabledModal, setShowDisabledModal] = useState(false);
 
   const addressStorageLoaded = useRef(false);
   const contactStorageLoaded = useRef(false);
@@ -158,9 +161,49 @@ export default function CheckoutScreen({ navigation }: Props) {
 
       const params = storeId ? { store: storeId } : undefined;
       getSettings(params)
-        .then((res) => {
-          setFees((prev) => ({ ...prev, ...res.data }));
-          setCheckoutDisabled(Boolean(res.data.checkoutDisabled));
+        .then(async (res) => {
+          let data = res.data;
+          let globalData: any = null;
+          try {
+            const globalRes = await getSettings();
+            globalData = globalRes?.data;
+          } catch (e) {}
+
+          const isGloballyDisabled = Boolean(globalData?.checkoutDisabled);
+          const isDisabled = Boolean(data?.checkoutDisabled || isGloballyDisabled);
+
+          const storeBannerMsg =
+            data?.banners?.find((b: any) => b.isCheckoutNotice)?.message?.trim() ||
+            data?.banners?.find((b: any) => b.isCheckoutNotice)?.subtitle?.trim();
+
+          const globalBannerMsg =
+            globalData?.banners?.find((b: any) => b.isCheckoutNotice)?.message?.trim() ||
+            globalData?.banners?.find((b: any) => b.isCheckoutNotice)?.subtitle?.trim();
+
+          const storeCustomMsg =
+            data?.checkoutDisabledMessage &&
+            data.checkoutDisabledMessage !== 'We are currently not accepting new orders. Please check back shortly!'
+              ? data.checkoutDisabledMessage.trim()
+              : '';
+
+          const globalCustomMsg =
+            globalData?.checkoutDisabledMessage &&
+            globalData.checkoutDisabledMessage !== 'We are currently not accepting new orders. Please check back shortly!'
+              ? globalData.checkoutDisabledMessage.trim()
+              : '';
+
+          const resolvedMsg =
+            storeBannerMsg ||
+            globalBannerMsg ||
+            storeCustomMsg ||
+            globalCustomMsg ||
+            data?.checkoutDisabledMessage?.trim() ||
+            globalData?.checkoutDisabledMessage?.trim() ||
+            '';
+
+          setFees((prev) => ({ ...prev, ...data }));
+          setCheckoutDisabled(isDisabled);
+          setCheckoutDisabledMessage(resolvedMsg);
         })
         .catch((err) => console.error('Error fetching settings:', err));
     };
@@ -226,8 +269,60 @@ export default function CheckoutScreen({ navigation }: Props) {
   };
 
   const handlePlaceOrder = async () => {
-    if (checkoutDisabled) {
-      Alert.alert(t('errorTitle'), t('cartUnavailableMsg'));
+    let isDisabled = checkoutDisabled;
+    let resolvedMsg = checkoutDisabledMessage;
+
+    // Realtime check before placing order
+    try {
+      const savedStore = await AsyncStorage.getItem('active_store');
+      const storeId = savedStore ? JSON.parse(savedStore)._id : undefined;
+      const freshRes = await getSettings(storeId ? { store: storeId } : undefined);
+      let freshData = freshRes?.data;
+      let globalData: any = null;
+      try {
+        const globalRes = await getSettings();
+        globalData = globalRes?.data;
+      } catch (e) {}
+
+      const isGloballyDisabled = Boolean(globalData?.checkoutDisabled);
+      if (freshData?.checkoutDisabled || isGloballyDisabled) {
+        isDisabled = true;
+        const storeBannerMsg =
+          freshData?.banners?.find((b: any) => b.isCheckoutNotice)?.message?.trim() ||
+          freshData?.banners?.find((b: any) => b.isCheckoutNotice)?.subtitle?.trim();
+
+        const globalBannerMsg =
+          globalData?.banners?.find((b: any) => b.isCheckoutNotice)?.message?.trim() ||
+          globalData?.banners?.find((b: any) => b.isCheckoutNotice)?.subtitle?.trim();
+
+        const storeCustomMsg =
+          freshData?.checkoutDisabledMessage &&
+          freshData.checkoutDisabledMessage !== 'We are currently not accepting new orders. Please check back shortly!'
+            ? freshData.checkoutDisabledMessage.trim()
+            : '';
+
+        const globalCustomMsg =
+          globalData?.checkoutDisabledMessage &&
+          globalData.checkoutDisabledMessage !== 'We are currently not accepting new orders. Please check back shortly!'
+            ? globalData.checkoutDisabledMessage.trim()
+            : '';
+
+        resolvedMsg =
+          storeBannerMsg ||
+          globalBannerMsg ||
+          storeCustomMsg ||
+          globalCustomMsg ||
+          freshData?.checkoutDisabledMessage?.trim() ||
+          globalData?.checkoutDisabledMessage?.trim() ||
+          resolvedMsg;
+
+        setCheckoutDisabled(true);
+        setCheckoutDisabledMessage(resolvedMsg);
+      }
+    } catch (e) {}
+
+    if (isDisabled) {
+      setShowDisabledModal(true);
       return;
     }
     if (items.length === 0) {
@@ -245,7 +340,7 @@ export default function CheckoutScreen({ navigation }: Props) {
     }
     if (confirmMobile !== mobile) {
       scrollViewRef.current?.scrollTo({ y: Math.max(0, confirmMobileSectionY.current - 15), animated: true });
-      Alert.alert(t('errorTitle'), 'Contact numbers do not match. Please confirm your number.');
+      Alert.alert(t('errorTitle'), t('mobileMismatchMsg') || 'Contact numbers do not match. Please confirm your number.');
       return;
     }
     if (!location) {
@@ -286,6 +381,7 @@ export default function CheckoutScreen({ navigation }: Props) {
           price: i.price,
           quantity: i.quantity,
           image: i.image,
+          category: i.category,
         })),
         subtotal,
         gstAmount: currentGstAmount,
@@ -294,12 +390,12 @@ export default function CheckoutScreen({ navigation }: Props) {
         totalAmount: grandTotal,
       });
       setLatestOrder(res.data);
-      // Save order locally to device orders list (max 12 orders)
+      // Save order locally to device orders list (max 50 orders)
       try {
         const savedOrdersStr = await AsyncStorage.getItem('@device_orders');
         const existingOrders = savedOrdersStr ? JSON.parse(savedOrdersStr) : [];
         if (!existingOrders.some((o: any) => o._id === res.data._id)) {
-          const updatedOrders = [res.data, ...existingOrders].slice(0, 12);
+          const updatedOrders = [res.data, ...existingOrders].slice(0, 50);
           await AsyncStorage.setItem('@device_orders', JSON.stringify(updatedOrders));
         }
       } catch (err) {
@@ -307,7 +403,14 @@ export default function CheckoutScreen({ navigation }: Props) {
       }
       clearCart();
       navigation.replace('Success', { orderId: res.data._id });
-    } catch {
+    } catch (err: any) {
+      const serverMsg = err?.response?.data?.message;
+      if (serverMsg && typeof serverMsg === 'string') {
+        setCheckoutDisabled(true);
+        setCheckoutDisabledMessage(serverMsg);
+        setShowDisabledModal(true);
+        return;
+      }
       const message = !isConnected ? t('cartUnavailableMsg') : t('orderFailedMsg');
       Alert.alert(t('errorTitle'), message);
     } finally {
@@ -334,6 +437,22 @@ export default function CheckoutScreen({ navigation }: Props) {
         contentContainerStyle={{ paddingBottom: 20 }}
       >
 
+        {checkoutDisabled && (
+          <TouchableOpacity
+            style={styles.disabledBanner}
+            onPress={() => setShowDisabledModal(true)}
+            activeOpacity={0.85}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, marginRight: 8 }}>
+              <Ionicons name="pause-circle" size={20} color="#ef4444" />
+              <Text style={styles.disabledBannerText} numberOfLines={2}>
+                {checkoutDisabledMessage?.trim() || (language === 'mr' ? 'ऑनलाइन ऑर्डर्स तात्पुरते बंद आहेत. तपशील पाहण्यासाठी स्पर्श करा.' : language === 'hi' ? 'ऑनलाइन ऑर्डर अस्थायी रूप से बंद हैं। विवरण देखने के लिए टैप करें।' : 'Online orders are temporarily paused. Tap to view details.')}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color="#ef4444" />
+          </TouchableOpacity>
+        )}
+
         {hasAnyDetail && (
           <TouchableOpacity
             style={styles.topClearBtn}
@@ -341,7 +460,9 @@ export default function CheckoutScreen({ navigation }: Props) {
             activeOpacity={0.85}
           >
             <Ionicons name="trash-outline" size={15} color="#a855f7" />
-            <Text style={styles.topClearBtnText}>Clear All Details For New Address</Text>
+            <Text style={styles.topClearBtnText}>
+              {language === 'mr' ? 'नवीन पत्त्यासाठी सर्व माहिती साफ करा' : language === 'hi' ? 'नए पते के लिए सभी विवरण साफ़ करें' : 'Clear All Details For New Address'}
+            </Text>
           </TouchableOpacity>
         )}
 
@@ -379,7 +500,7 @@ export default function CheckoutScreen({ navigation }: Props) {
       <View style={styles.section} onLayout={(e) => { confirmMobileSectionY.current = e.nativeEvent.layout.y; }}>
         <View style={styles.sectionHeader}>
           <Ionicons name="shield-checkmark-outline" size={18} color="#a855f7" />
-          <Text style={styles.sectionTitle}>Confirm Contact Number</Text>
+          <Text style={styles.sectionTitle}>{t('confirmContactNumber') || 'Confirm Contact Number'}</Text>
         </View>
         <TextInput
           style={[
@@ -387,7 +508,7 @@ export default function CheckoutScreen({ navigation }: Props) {
             confirmMobile.length === 10 && confirmMobile === mobile && styles.inputSuccess,
             confirmMobile.length === 10 && confirmMobile !== mobile && styles.inputError,
           ]}
-          placeholder="Re-enter your mobile number"
+          placeholder={t('reenterMobile') || 'Re-enter your mobile number'}
           placeholderTextColor="#94a3b8"
           keyboardType="phone-pad"
           maxLength={10}
@@ -397,13 +518,13 @@ export default function CheckoutScreen({ navigation }: Props) {
         {confirmMobile.length === 10 && confirmMobile === mobile && (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 }}>
             <Ionicons name="checkmark-circle" size={14} color="#22c55e" />
-            <Text style={styles.successText}>Numbers match ✓</Text>
+            <Text style={styles.successText}>{t('numbersMatch') || 'Numbers match ✓'}</Text>
           </View>
         )}
         {confirmMobile.length > 0 && confirmMobile.length === 10 && confirmMobile !== mobile && (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 }}>
             <Ionicons name="close-circle" size={14} color="#ef4444" />
-            <Text style={styles.errorText}>Numbers do not match</Text>
+            <Text style={styles.errorText}>{t('mobileMismatch') || 'Numbers do not match'}</Text>
           </View>
         )}
       </View>
@@ -412,11 +533,13 @@ export default function CheckoutScreen({ navigation }: Props) {
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Ionicons name="home-outline" size={18} color="#a855f7" />
-          <Text style={styles.sectionTitle}>Delivery Address</Text>
+          <Text style={styles.sectionTitle}>
+            {language === 'mr' ? 'डिलिव्हरी पत्ता' : language === 'hi' ? 'डिलीवरी का पता' : 'Delivery Address'}
+          </Text>
         </View>
         <TextInput
           style={[styles.input, { minHeight: 60, textAlignVertical: 'top' }]}
-          placeholder="Enter complete address (optional)"
+          placeholder={language === 'mr' ? 'पूर्ण पत्ता टाका (पर्यायी)' : language === 'hi' ? 'पूरा पता दर्ज करें (वैकल्पिक)' : 'Enter complete address (optional)'}
           placeholderTextColor="#94a3b8"
           multiline
           numberOfLines={3}
@@ -426,7 +549,7 @@ export default function CheckoutScreen({ navigation }: Props) {
         {address.trim().length >= 5 && (
           <TouchableOpacity style={styles.clearBtn} onPress={handleClearSaved}>
             <Ionicons name="trash-outline" size={13} color="#94a3b8" />
-            <Text style={styles.clearBtnText}>Clear saved info</Text>
+            <Text style={styles.clearBtnText}>{t('clearSavedInfo') || 'Clear saved info'}</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -453,7 +576,7 @@ export default function CheckoutScreen({ navigation }: Props) {
             {locLoading ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <PremiumLoader size="xsmall" fullScreen={false} />
-                <Text style={styles.locationBtnText}>Getting location...</Text>
+                <Text style={styles.locationBtnText}>{t('gettingLocation') || 'Getting location...'}</Text>
               </View>
             ) : (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -482,7 +605,7 @@ export default function CheckoutScreen({ navigation }: Props) {
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                 <Text style={styles.codTitle}>{t('cashOnDelivery')}</Text>
                 <View style={styles.codBadge}>
-                  <Text style={styles.codBadgeText}>RECOMMENDED</Text>
+                  <Text style={styles.codBadgeText}>{t('recommended') || 'RECOMMENDED'}</Text>
                 </View>
               </View>
               <Text style={styles.codSub}>{t('codDescription')}</Text>
@@ -494,7 +617,7 @@ export default function CheckoutScreen({ navigation }: Props) {
           <View style={styles.upiBadgesRow}>
             <View style={[styles.upiTag, { backgroundColor: '#ecfdf5', borderColor: '#a7f3d0' }]}>
               <Ionicons name="cash-outline" size={13} color="#059669" />
-              <Text style={[styles.upiTagText, { color: '#047857' }]}>Cash</Text>
+              <Text style={[styles.upiTagText, { color: '#047857' }]}>{language === 'mr' ? 'Cash' : language === 'hi' ? 'Cash' : 'Cash'}</Text>
             </View>
             <View style={[styles.upiTag, { backgroundColor: '#f0f9ff', borderColor: '#bae6fd' }]}>
               <Ionicons name="qr-code-outline" size={13} color="#0284c7" />
@@ -528,13 +651,13 @@ export default function CheckoutScreen({ navigation }: Props) {
         <View style={styles.totalDivider} />
 
         <View style={styles.chargeRow}>
-          <Text style={styles.chargeLabel}>Subtotal</Text>
+          <Text style={styles.chargeLabel}>{t('subtotal') || 'Subtotal'}</Text>
           <Text style={styles.chargeValue}>₹{totalAmount}</Text>
         </View>
 
         {fees.gstEnabled && (
           <View style={styles.chargeRow}>
-            <Text style={styles.chargeLabel}>GST ({fees.gstPercentage}%)</Text>
+            <Text style={styles.chargeLabel}>{t('taxesGst') || 'GST'} ({fees.gstPercentage}%)</Text>
             <Text style={styles.chargeValue}>+ ₹{currentGstAmount.toFixed(2)}</Text>
           </View>
         )}
@@ -542,14 +665,14 @@ export default function CheckoutScreen({ navigation }: Props) {
         {fees.deliveryFeeEnabled && (
           <>
             <View style={styles.chargeRow}>
-              <Text style={styles.chargeLabel}>Delivery Fee</Text>
+              <Text style={styles.chargeLabel}>{t('deliveryFee') || 'Delivery Fee'}</Text>
               {isFreeDelivery ? (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                   <Text style={[styles.chargeValue, { textDecorationLine: 'line-through', color: '#94a3b8', fontSize: 13 }]}>
                     ₹{fees.deliveryFee}
                   </Text>
                   <Text style={[styles.chargeValue, { color: '#22c55e', fontWeight: '700' }]}>
-                    Free
+                    {t('free') || 'Free'}
                   </Text>
                 </View>
               ) : (
@@ -560,7 +683,13 @@ export default function CheckoutScreen({ navigation }: Props) {
             {fees.freeDeliveryThresholdEnabled && !isFreeDelivery && (
               <View style={{ marginTop: 2, marginBottom: 6, paddingLeft: 8, borderLeftWidth: 2, borderLeftColor: '#a855f7' }}>
                 <Text style={{ fontSize: 12, color: '#64748b', fontWeight: '500' }}>
-                  Shop for <Text style={{ fontWeight: '700', color: '#a855f7' }}>₹{(fees.freeDeliveryThreshold - subtotal).toFixed(0)}</Text> more to get Free Delivery!
+                  {language === 'mr' ? (
+                    <>मोफत डिलिव्हरीसाठी आणखी <Text style={{ fontWeight: '700', color: '#a855f7' }}>₹{(fees.freeDeliveryThreshold - subtotal).toFixed(0)}</Text> ची खरेदी करा!</>
+                  ) : language === 'hi' ? (
+                    <>मुफ़्त डिलीवरी के लिए और <Text style={{ fontWeight: '700', color: '#a855f7' }}>₹{(fees.freeDeliveryThreshold - subtotal).toFixed(0)}</Text> की खरीदारी करें!</>
+                  ) : (
+                    <>Shop for <Text style={{ fontWeight: '700', color: '#a855f7' }}>₹{(fees.freeDeliveryThreshold - subtotal).toFixed(0)}</Text> more to get Free Delivery!</>
+                  )}
                 </Text>
               </View>
             )}
@@ -568,7 +697,7 @@ export default function CheckoutScreen({ navigation }: Props) {
             {fees.freeDeliveryThresholdEnabled && isFreeDelivery && (
               <View style={{ marginTop: 2, marginBottom: 6, paddingLeft: 8, borderLeftWidth: 2, borderLeftColor: '#22c55e' }}>
                 <Text style={{ fontSize: 12, color: '#22c55e', fontWeight: '600' }}>
-                  🎉 Free Delivery Threshold Met!
+                  {language === 'mr' ? '🎉 मोफत डिलिव्हरी मर्यादा पूर्ण झाली!' : language === 'hi' ? '🎉 मुफ़्त डिलीवरी सीमा पूरी हो गई!' : '🎉 Free Delivery Threshold Met!'}
                 </Text>
               </View>
             )}
@@ -577,7 +706,7 @@ export default function CheckoutScreen({ navigation }: Props) {
 
         {fees.handlingFeeEnabled && (
           <View style={styles.chargeRow}>
-            <Text style={styles.chargeLabel}>Handling Charges</Text>
+            <Text style={styles.chargeLabel}>{t('handlingFee') || 'Handling Charges'}</Text>
             <Text style={styles.chargeValue}>+ ₹{fees.handlingFee}</Text>
           </View>
         )}
@@ -601,9 +730,12 @@ export default function CheckoutScreen({ navigation }: Props) {
         </View>
 
         <TouchableOpacity
-          style={[styles.stickyPlaceBtn, !isReady && styles.stickyPlaceBtnDisabled]}
+          style={[
+            styles.stickyPlaceBtn,
+            !isReady && !checkoutDisabled && styles.stickyPlaceBtnDisabled
+          ]}
           onPress={handlePlaceOrder}
-          disabled={placing || !isReady}
+          disabled={placing}
           activeOpacity={0.85}
         >
           {placing ? (
@@ -614,11 +746,20 @@ export default function CheckoutScreen({ navigation }: Props) {
           ) : (
             <View style={styles.stickyPlaceBtnContent}>
               <Ionicons name="paper-plane-outline" size={18} color="#ffffff" />
-              <Text style={styles.stickyPlaceBtnText} numberOfLines={1}>{t('placeOrder')}</Text>
+              <Text style={styles.stickyPlaceBtnText} numberOfLines={1}>
+                {t('placeOrder')}
+              </Text>
             </View>
           )}
         </TouchableOpacity>
       </View>
+
+      {/* Checkout Disabled Popup Modal */}
+      <CheckoutDisabledModal
+        visible={showDisabledModal}
+        onClose={() => setShowDisabledModal(false)}
+        message={checkoutDisabledMessage}
+      />
     </View>
   );
 }
@@ -861,9 +1002,33 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 4,
   },
+  stickyPlaceBtnPaused: {
+    backgroundColor: '#dc2626',
+    shadowColor: '#dc2626',
+  },
   stickyPlaceBtnDisabled: {
     backgroundColor: '#d8b4fe',
     shadowOpacity: 0,
+  },
+  disabledBanner: {
+    marginHorizontal: 16,
+    marginTop: 14,
+    marginBottom: 4,
+    backgroundColor: '#fef2f2',
+    borderWidth: 1,
+    borderColor: '#fecaca',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  disabledBannerText: {
+    fontSize: 12.5,
+    color: '#dc2626',
+    fontWeight: '600',
+    lineHeight: 17,
   },
   stickyPlaceBtnContent: {
     flexDirection: 'row',

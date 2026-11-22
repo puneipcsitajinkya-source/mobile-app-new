@@ -42,6 +42,7 @@ export type HomeStackParamList = {
 };
 
 function HomeStackScreen() {
+  const { tCategory } = useLanguage();
   return (
     <HomeStackNav.Navigator
       screenOptions={{
@@ -58,7 +59,10 @@ function HomeStackScreen() {
       <HomeStackNav.Screen
         name="CategoryProducts"
         component={CategoryProductsScreen}
-        options={({ route }) => ({ title: route.params.categoryName, headerShown: true })}
+        options={({ route }) => ({
+          title: tCategory(route.params.categoryName) || route.params.categoryName,
+          headerShown: true
+        })}
       />
     </HomeStackNav.Navigator>
   );
@@ -67,7 +71,7 @@ function HomeStackScreen() {
 function MainTabs() {
   const { totalItems } = useCart();
   const insets = useSafeAreaInsets();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
 
   return (
     <Tab.Navigator
@@ -100,7 +104,7 @@ function MainTabs() {
         name="Home"
         component={HomeStackScreen}
         options={{
-          tabBarLabel: 'Shop',
+          tabBarLabel: t('shop') || (language === 'mr' ? 'दुकान' : language === 'hi' ? 'दुकान' : 'Shop'),
           tabBarIcon: ({ focused }) => (
             <Ionicons name={focused ? 'storefront' : 'storefront-outline'} size={22} color="#4b5563" />
           ),
@@ -110,7 +114,7 @@ function MainTabs() {
         name="Cart"
         component={CartScreen}
         options={{
-          tabBarLabel: 'Cart',
+          tabBarLabel: t('cart') || (language === 'mr' ? 'पिशवी' : language === 'hi' ? 'कार्ट' : 'Cart'),
           tabBarIcon: ({ focused }) => (
             <Ionicons name={focused ? 'cart' : 'cart-outline'} size={23} color="#4b5563" />
           ),
@@ -122,7 +126,7 @@ function MainTabs() {
         name="Orders"
         component={OrdersScreen}
         options={{
-          tabBarLabel: t('ordersTitle') || 'My Orders',
+          tabBarLabel: t('orders') || t('ordersTitle') || (language === 'mr' ? 'ऑर्डर्स' : language === 'hi' ? 'ऑर्डर' : 'Orders'),
           tabBarIcon: ({ focused }) => (
             <Ionicons name={focused ? 'receipt' : 'receipt-outline'} size={22} color="#4b5563" />
           ),
@@ -132,7 +136,7 @@ function MainTabs() {
         name="Feedback"
         component={FeedbackScreen}
         options={{
-          tabBarLabel: t('typeFeedback') || 'Feedback',
+          tabBarLabel: t('feedback') || t('typeFeedback') || (language === 'mr' ? 'अभिप्राय' : language === 'hi' ? 'फीडबैक' : 'Feedback'),
           tabBarIcon: ({ focused }) => (
             <Ionicons name={focused ? 'chatbox-ellipses' : 'chatbox-ellipses-outline'} size={22} color="#4b5563" />
           ),

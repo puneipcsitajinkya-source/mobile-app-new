@@ -57,6 +57,7 @@ interface ProductCardProps {
   onDecrease: (productId: string) => void;
   tProduct: (name: Product['name']) => string;
   cardWidth: number;
+  language?: string;
 }
 
 const { width } = Dimensions.get('window');
@@ -69,7 +70,7 @@ const FULL_IMG_SIZE = FULL_CARD_WIDTH - 16;   // card width minus horizontal pad
 const SIDE_IMG_SIZE = SIDE_CARD_WIDTH - 16;
 
 const ProductCard = React.memo(function ProductCard({
-  item, qty, onPress, onAdd, onIncrease, onDecrease, tProduct, cardWidth,
+  item, qty, onPress, onAdd, onIncrease, onDecrease, tProduct, cardWidth, language = 'en',
 }: ProductCardProps) {
   const hasDiscount = (item.discount ?? 0) > 0;
   const hasMrp = item.mrp != null && item.mrp > item.price;
@@ -197,7 +198,9 @@ const ProductCard = React.memo(function ProductCard({
           {/* Delivery Row */}
           <View style={styles.deliveryRow}>
             <Ionicons name="time" size={11} color="#64748b" style={{ marginRight: 2 }} />
-            <Text style={styles.deliveryText}>8 mins</Text>
+            <Text style={styles.deliveryText}>
+              {language === 'mr' ? '८ मिनिटे' : language === 'hi' ? '८ मिनट' : '8 mins'}
+            </Text>
           </View>
 
           {/* Name */}
@@ -213,7 +216,9 @@ const ProductCard = React.memo(function ProductCard({
               ))
             ) : (
               <View style={styles.specTag}>
-                <Text style={styles.specTagText}>Premium Quality</Text>
+                <Text style={styles.specTagText}>
+                  {language === 'mr' ? 'उत्कृष्ट दर्जा' : language === 'hi' ? 'प्रीमियम गुणवत्ता' : 'Premium Quality'}
+                </Text>
               </View>
             )}
           </View>
@@ -244,7 +249,9 @@ const ProductCard = React.memo(function ProductCard({
             </View>
           ) : (
             <TouchableOpacity style={styles.addBtn} onPress={() => onAdd(item)} activeOpacity={0.8}>
-              <Text style={styles.addBtnText}>ADD</Text>
+              <Text style={styles.addBtnText}>
+                {language === 'mr' ? 'जोडा' : language === 'hi' ? 'जोड़ें' : 'ADD'}
+              </Text>
             </TouchableOpacity>
           )}
         </View>
@@ -273,7 +280,7 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
   const [subcategories, setSubcategories] = useState<Subcategory[]>([]);
   const [selectedSubcategory, setSelectedSubcategory] = useState<string>('');
   const { addToCart, items: cart, totalItems, totalAmount: cartTotal, increaseQty, decreaseQty } = useCart();
-  const { tProduct } = useLanguage();
+  const { language, tProduct, tCategory } = useLanguage();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -366,7 +373,7 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
   }, [cart]);
 
   const handleAdd = useCallback((product: Product) => {
-    addToCart({ _id: product._id, name: product.name, price: product.price, image: product.image, mrp: product.mrp });
+    addToCart({ _id: product._id, name: product.name, price: product.price, image: product.image, mrp: product.mrp, category: product.category });
   }, [addToCart]);
 
   const handleProductPress = useCallback((productId: string) => {
@@ -386,15 +393,16 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
         onDecrease={decreaseQty}
         tProduct={tProduct}
         cardWidth={cardWidth}
+        language={language}
       />
     );
-  }, [getProductQty, handleAdd, handleProductPress, increaseQty, decreaseQty, tProduct, subcategories.length]);
+  }, [getProductQty, handleAdd, handleProductPress, increaseQty, decreaseQty, tProduct, subcategories.length, language]);
 
   if (loading) {
     return (
       <PremiumLoader
-        message="Loading products"
-        subMessage={`Fetching items in ${categoryName}`}
+        message={language === 'mr' ? 'उत्पादने लोड करत आहे...' : language === 'hi' ? 'उत्पाद लोड हो रहे हैं...' : 'Loading products'}
+        subMessage={tCategory(categoryName)}
         size="large"
         fullScreen
       />
@@ -444,7 +452,7 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
                       />
                     )}
                     <Text style={[styles.subcategoryCardLabel, isSelected && styles.subcategoryCardLabelActive]} numberOfLines={2}>
-                      {item.name}
+                      {isAllTab ? (language === 'mr' ? 'सर्व' : language === 'hi' ? 'सभी' : 'All') : item.name}
                     </Text>
                   </TouchableOpacity>
                 );
@@ -474,8 +482,12 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
                   <View style={styles.emptyIconBox}>
                     <Ionicons name="basket-outline" size={48} color="#a855f7" />
                   </View>
-                  <Text style={styles.emptyTitle}>No products found</Text>
-                  <Text style={styles.emptySubText}>No items are available{selectedSubcategory ? ' in this subcategory' : ' in this category'} right now.</Text>
+                  <Text style={styles.emptyTitle}>
+                    {language === 'mr' ? 'कोणतीही उत्पादने आढळली नाहीत' : language === 'hi' ? 'कोई उत्पाद नहीं मिला' : 'No products found'}
+                  </Text>
+                  <Text style={styles.emptySubText}>
+                    {language === 'mr' ? 'या श्रेणीत कोणतीही उत्पादने उपलब्ध नाहीत.' : language === 'hi' ? 'इस श्रेणी में कोई उत्पाद उपलब्ध नहीं है।' : 'No items are available in this category right now.'}
+                  </Text>
                 </View>
               }
             />
@@ -502,8 +514,12 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
               <View style={styles.emptyIconBox}>
                 <Ionicons name="basket-outline" size={48} color="#a855f7" />
               </View>
-              <Text style={styles.emptyTitle}>No products found</Text>
-              <Text style={styles.emptySubText}>No items are available{selectedSubcategory ? ' in this subcategory' : ' in this category'} right now.</Text>
+              <Text style={styles.emptyTitle}>
+                {language === 'mr' ? 'कोणतीही उत्पादने आढळली नाहीत' : language === 'hi' ? 'कोई उत्पाद नहीं मिला' : 'No products found'}
+              </Text>
+              <Text style={styles.emptySubText}>
+                {language === 'mr' ? 'या श्रेणीत कोणतीही उत्पादने उपलब्ध नाहीत.' : language === 'hi' ? 'इस श्रेणी में कोई उत्पाद उपलब्ध नहीं है।' : 'No items are available in this category right now.'}
+              </Text>
             </View>
           }
         />

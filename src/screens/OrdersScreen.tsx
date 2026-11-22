@@ -1,7 +1,14 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, FlatList,
-  StyleSheet, RefreshControl, ScrollView, Alert, AppState,
+  View,
+  Text,
+  TouchableOpacity,
+  FlatList,
+  StyleSheet,
+  RefreshControl,
+  ScrollView,
+  Alert,
+  AppState,
 } from 'react-native';
 import { getOrder, getSettings, updateOrderStatus } from '../services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -20,6 +27,7 @@ interface OrderItem {
   price: number;
   quantity: number;
   image?: string;
+  category?: string;
 }
 
 interface Order {
@@ -36,9 +44,12 @@ interface Order {
   createdAt: string;
 }
 
+const STORAGE_ORDERS_KEY = '@device_orders';
+const MAX_LOCAL_ORDERS = 50;
+
 export default function OrdersScreen() {
   const insets = useSafeAreaInsets();
-  const { t } = useLanguage();
+  const { language, t, tProduct } = useLanguage();
   const { latestOrder } = useCart();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(false);
@@ -71,96 +82,157 @@ export default function OrdersScreen() {
 
   const handleCancelOrder = (orderId: string) => {
     Alert.alert(
-      t("Cancel Order"),
-      t("Are you sure you want to cancel this order?"),
+      t('Cancel Order') || 'Cancel Order',
+      t('Are you sure you want to cancel this order?') || 'Are you sure you want to cancel this order?',
       [
-        { text: t('no') || "No", style: "cancel" },
+        { text: t('no') || 'No', style: 'cancel' },
         {
-          text: t('yes') || "Yes, Cancel",
-          style: "destructive",
+          text: t('yes') || 'Yes, Cancel',
+          style: 'destructive',
           onPress: async () => {
             try {
               setLoading(true);
               await updateOrderStatus(orderId, 'cancelled');
 
-              // Update local state and AsyncStorage
-              const savedOrdersStr = await AsyncStorage.getItem('@device_orders');
+              // Update local state and AsyncStorage immediately
+              const savedOrdersStr = await AsyncStorage.getItem(STORAGE_ORDERS_KEY);
               if (savedOrdersStr) {
-                const existingOrders = JSON.parse(savedOrdersStr);
-                const updatedOrders = existingOrders.map((o: any) =>
-                  o._id === orderId ? { ...o, status: 'cancelled' } : o
+                const existingOrders: Order[] = JSON.parse(savedOrdersStr);
+                const updatedOrders = existingOrders.map((o) =>
+                  o._id === orderId ? { ...o, status: 'cancelled' as const } : o
                 );
-                await AsyncStorage.setItem('@device_orders', JSON.stringify(updatedOrders));
+                await AsyncStorage.setItem(STORAGE_ORDERS_KEY, JSON.stringify(updatedOrders));
                 setOrders(updatedOrders);
               } else {
-                // fallback if storage was empty, refresh list
-                fetchOrders(false);
+                setOrders((prev) =>
+                  prev.map((o) => (o._id === orderId ? { ...o, status: 'cancelled' as const } : o))
+                );
               }
 
-              Alert.alert(t("Order has been cancelled successfully."));
+              Alert.alert(
+                language === 'mr'
+                  ? 'ऑर्डर यशस्वीपणे रद्द केली.'
+                  : language === 'hi'
+                    ? 'ऑर्डर सफलतापूर्वक रद्द कर दिया गया।'
+                    : 'Order has been cancelled successfully.'
+              );
             } catch (err) {
               console.error('Failed to cancel order:', err);
-              Alert.alert(t("Failed to cancel order. Please try again."));
+              Alert.alert(
+                language === 'mr'
+                  ? 'ऑर्डर रद्द करण्यात अयशस्वी. कृपया पुन्हा प्रयत्न करा.'
+                  : language === 'hi'
+                    ? 'ऑर्डर रद्द करने में विफल। कृपया पुनः प्रयास करें।'
+                    : 'Failed to cancel order. Please try again.'
+              );
             } finally {
               setLoading(false);
             }
-          }
-        }
+          },
+        },
       ]
     );
   };
 
-  const fetchOrders = useCallback(async (isRefresh = false) => {
-    if (isRefresh) {
-      setRefreshing(true);
-    } else {
-      setLoading(true);
-    }
-    setErrorMsg(null);
+  // Sync device orders with backend & persist to AsyncStorage
+  const syncOrders = useCallback(
+    async (isUserRefresh = false) => {
+      if (isUserRefresh) {
+        setRefreshing(true);
+      }
+      setErrorMsg(null);
 
-    try {
-      const savedOrdersStr = await AsyncStorage.getItem('@device_orders');
-      const rawLocalOrders: Order[] = savedOrdersStr ? JSON.parse(savedOrdersStr) : [];
-      const localOrders = rawLocalOrders.slice(0, 12);
+      try {
+        // 1. Read current local storage
+        const savedOrdersStr = await AsyncStorage.getItem(STORAGE_ORDERS_KEY);
+        let currentLocal: Order[] = savedOrdersStr ? JSON.parse(savedOrdersStr) : [];
 
-      if (localOrders.length === 0) {
-        setOrders([]);
-        return;
+        if (currentLocal.length === 0) {
+          setOrders([]);
+          return;
+        }
+
+        // 2. Fetch fresh status for this device's orders in parallel
+        const updatedLocal = await Promise.all(
+          currentLocal.map(async (order) => {
+            try {
+              const res = await getOrder(order._id);
+              if (res.data) return res.data;
+              return order;
+            } catch {
+              return order;
+            }
+          })
+        );
+
+        // 3. Sort descending by createdAt and slice to MAX_LOCAL_ORDERS
+        const finalOrders = updatedLocal
+          .filter((o) => Boolean(o && o._id))
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+          .slice(0, MAX_LOCAL_ORDERS);
+
+        // 4. Persist to local storage (AsyncStorage)
+        if (finalOrders.length > 0) {
+          await AsyncStorage.setItem(STORAGE_ORDERS_KEY, JSON.stringify(finalOrders));
+        }
+
+        setOrders(finalOrders);
+      } catch (err) {
+        console.error('Error syncing orders:', err);
+        // Fallback to whatever is in local storage
+        try {
+          const fallbackStr = await AsyncStorage.getItem(STORAGE_ORDERS_KEY);
+          if (fallbackStr) {
+            const fallbackOrders = JSON.parse(fallbackStr);
+            if (Array.isArray(fallbackOrders) && fallbackOrders.length > 0) {
+              setOrders(fallbackOrders);
+            }
+          }
+        } catch (e) {
+          // ignore
+        }
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [latestOrder]
+  );
+
+  // 1. Immediately load local orders on mount (0ms delay offline-first experience)
+  useEffect(() => {
+    let isMounted = true;
+
+    const initOrders = async () => {
+      try {
+        const savedOrdersStr = await AsyncStorage.getItem(STORAGE_ORDERS_KEY);
+        if (savedOrdersStr) {
+          const parsed: Order[] = JSON.parse(savedOrdersStr);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            if (isMounted) {
+              setOrders(parsed);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to read initial local orders:', err);
       }
 
-      // Try to fetch updated status for all local orders in parallel
-      const updatedOrders = await Promise.all(
-        localOrders.map(async (order) => {
-          try {
-            const res = await getOrder(order._id);
-            if (res.data) {
-              return res.data;
-            }
-            return order;
-          } catch (err) {
-            console.warn(`Failed to fetch fresh order status for ${order._id}:`, err);
-            return order;
-          }
-        })
-      );
+      // Background sync fresh data from backend
+      if (isMounted) {
+        syncOrders(false);
+      }
+    };
 
-      const trimmedOrders = updatedOrders.slice(0, 12);
+    initOrders();
 
-      // Save updated order list back to local storage
-      await AsyncStorage.setItem('@device_orders', JSON.stringify(trimmedOrders));
-      setOrders(trimmedOrders);
-    } catch (err) {
-      console.error('Error fetching orders:', err);
-      setErrorMsg('Failed to load orders. Please try again.');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [latestOrder]);
+    return () => {
+      isMounted = false;
+    };
+  }, [syncOrders]);
 
+  // Load support phone number from store settings
   useEffect(() => {
-    fetchOrders();
-    // Load dynamic support phone number from store-specific settings
     const fetchSettings = async () => {
       let storeId = '';
       const savedStore = await AsyncStorage.getItem('active_store');
@@ -182,20 +254,20 @@ export default function OrdersScreen() {
         .catch((err) => console.log('Failed to fetch contact settings:', err));
     };
     fetchSettings();
-  }, [fetchOrders]);
+  }, []);
 
   // Auto-reload when internet connection is restored
   useEffect(() => {
     const unsubscribe = onReconnect(() => {
-      fetchOrders(true);
+      syncOrders(true);
     });
     return unsubscribe;
-  }, [onReconnect, fetchOrders]);
+  }, [onReconnect, syncOrders]);
 
-  // Auto-poll every 20 seconds while the screen is focused and app is active
+  // Auto-poll every 2 minutes while active orders are pending
   const isFocused = useIsFocused();
   const hasActiveOrders = useMemo(
-    () => orders.some(o => ['pending', 'confirmed', 'out_for_delivery'].includes(o.status)),
+    () => orders.some((o) => ['pending', 'confirmed', 'out_for_delivery'].includes(o.status)),
     [orders]
   );
 
@@ -208,7 +280,7 @@ export default function OrdersScreen() {
     const startPolling = () => {
       if (intervalId) return;
       intervalId = setInterval(() => {
-        fetchOrders(true);
+        syncOrders(true);
       }, POLL_INTERVAL);
     };
 
@@ -219,13 +291,11 @@ export default function OrdersScreen() {
       }
     };
 
-    // Start polling immediately
     startPolling();
 
-    // Pause when app goes to background, resume + refresh when it comes back
     const subscription = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') {
-        fetchOrders(true); // Immediate refresh on foreground
+        syncOrders(true);
         startPolling();
       } else {
         stopPolling();
@@ -236,28 +306,28 @@ export default function OrdersScreen() {
       stopPolling();
       subscription.remove();
     };
-  }, [isFocused, hasActiveOrders, fetchOrders]);
+  }, [isFocused, hasActiveOrders, syncOrders]);
 
-  // Refetch when the tab/screen gains focus
+  // Refetch when tab gains focus
   useEffect(() => {
     if (isFocused) {
-      fetchOrders(true);
+      syncOrders(true);
     }
   }, [isFocused]);
 
   const getStatusColor = (status: Order['status']) => {
     switch (status) {
       case 'pending':
-        return { bg: '#fef3c7', text: '#d97706' }; // Amber/Yellow
+        return { bg: '#fef3c7', text: '#d97706' };
       case 'confirmed':
-        return { bg: '#faf5ff', text: '#a855f7' }; // Purple
+        return { bg: '#faf5ff', text: '#a855f7' };
       case 'out_for_delivery':
-        return { bg: '#eff6ff', text: '#3b82f6' }; // Blue
+        return { bg: '#eff6ff', text: '#3b82f6' };
       case 'delivered':
-        return { bg: '#f0fdf4', text: '#22c55e' }; // Green
+        return { bg: '#f0fdf4', text: '#22c55e' };
       case 'closed':
       case 'cancelled':
-        return { bg: '#fef2f2', text: '#dc2626' }; // Red
+        return { bg: '#fef2f2', text: '#dc2626' };
       default:
         return { bg: '#f1f5f9', text: '#64748b' };
     }
@@ -266,114 +336,118 @@ export default function OrdersScreen() {
   const getStatusLabel = (status: Order['status']) => {
     switch (status) {
       case 'pending':
-        return 'Pending';
+        return language === 'mr' ? 'प्रलंबित' : language === 'hi' ? 'लंबित' : 'Pending';
       case 'confirmed':
-        return 'Confirmed';
+        return language === 'mr' ? 'निश्चित झाले' : language === 'hi' ? 'पुष्ट हुआ' : 'Confirmed';
       case 'out_for_delivery':
-        return 'Out for Delivery';
+        return language === 'mr' ? 'डिलिव्हरीसाठी बाहेर पडले' : language === 'hi' ? 'डिलीवरी के लिए निकला' : 'Out for Delivery';
       case 'delivered':
-        return 'Delivered';
+        return language === 'mr' ? 'वितरित झाले' : language === 'hi' ? 'वितरित हुआ' : 'Delivered';
       case 'closed':
-        return 'Closed';
+        return language === 'mr' ? 'बंद झाले' : language === 'hi' ? 'बंद हुआ' : 'Closed';
       case 'cancelled':
-        return 'Cancelled';
+        return language === 'mr' ? 'रद्द झाले' : language === 'hi' ? 'रद्द हुआ' : 'Cancelled';
       default:
         return status;
     }
   };
 
-  const visibleOrders = useMemo(() => orders.slice(0, 12), [orders]);
+  const renderOrderItem = useCallback(
+    ({ item }: { item: Order }) => {
+      const statusTheme = getStatusColor(item.status);
+      const orderDate = new Date(item.createdAt).toLocaleDateString(
+        language === 'mr' ? 'mr-IN' : language === 'hi' ? 'hi-IN' : 'en-IN',
+        {
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        }
+      );
 
-  const renderOrderItem = useCallback(({ item }: { item: Order }) => {
-    const statusTheme = getStatusColor(item.status);
-    const orderDate = new Date(item.createdAt).toLocaleDateString('en-IN', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+      return (
+        <View style={styles.orderCard}>
+          {/* Header */}
+          <View style={styles.cardHeader}>
+            <View style={{ flex: 1, marginRight: 8 }}>
+              <Text style={styles.orderId}>#{item._id.slice(-8).toUpperCase()}</Text>
+              <Text style={styles.orderDate}>{orderDate}</Text>
+            </View>
 
-    return (
-      <View style={styles.orderCard}>
-        {/* Header */}
-        <View style={styles.cardHeader}>
-          <View style={{ flex: 1, marginRight: 8 }}>
-            <Text style={styles.orderId}>#{item._id.slice(-8).toUpperCase()}</Text>
-            <Text style={styles.orderDate}>{orderDate}</Text>
+            {item.status === 'pending' && getRemainingTime(item.createdAt) > 0 ? (
+              <TouchableOpacity
+                style={styles.cancelBtn}
+                onPress={() => handleCancelOrder(item._id)}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="close-circle-outline" size={14} color="#dc2626" style={{ marginRight: 4 }} />
+                <Text style={styles.cancelBtnText}>
+                  {language === 'mr' ? 'रद्द करा' : language === 'hi' ? 'रद्द करें' : 'Cancel'} ({formatTime(getRemainingTime(item.createdAt))})
+                </Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={[styles.statusBadge, { backgroundColor: statusTheme.bg }]}>
+                <Text style={[styles.statusText, { color: statusTheme.text }]}>
+                  {getStatusLabel(item.status)}
+                </Text>
+              </View>
+            )}
           </View>
 
-          {item.status === 'pending' && getRemainingTime(item.createdAt) > 0 ? (
-            <TouchableOpacity
-              style={styles.cancelBtn}
-              onPress={() => handleCancelOrder(item._id)}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="close-circle-outline" size={14} color="#dc2626" style={{ marginRight: 4 }} />
-              <Text style={styles.cancelBtnText}>
-                Cancel ({formatTime(getRemainingTime(item.createdAt))})
-              </Text>
-            </TouchableOpacity>
-          ) : (
-            <View style={[styles.statusBadge, { backgroundColor: statusTheme.bg }]}>
-              <Text style={[styles.statusText, { color: statusTheme.text }]}>
-                {getStatusLabel(item.status)}
-              </Text>
+          {/* Premium Animated Status Loader */}
+          <OrderStatusLoader status={item.status} />
+
+          <View style={styles.divider} />
+
+          {/* Items List */}
+          <View style={styles.itemsSection}>
+            {item.items.map((prod, index) => (
+              <View key={index} style={styles.itemRow}>
+                <Text style={styles.itemName} numberOfLines={1}>
+                  {tProduct(prod.name)}
+                </Text>
+                <Text style={styles.itemQty}>× {prod.quantity}</Text>
+                <Text style={styles.itemPrice}>₹{prod.price * prod.quantity}</Text>
+              </View>
+            ))}
+          </View>
+
+          <View style={styles.divider} />
+
+          {/* Address */}
+          {item.address && (
+            <View style={styles.addressBox}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                <Ionicons name="home-outline" size={12} color="#94a3b8" />
+                <Text style={styles.addressLabel}>
+                  {language === 'mr' ? 'डिलिव्हरी पत्ता:' : language === 'hi' ? 'डिलीवरी पता:' : 'Delivery Address:'}
+                </Text>
+              </View>
+              <Text style={styles.addressText} numberOfLines={2}>{item.address}</Text>
             </View>
           )}
-        </View>
 
-        {/* Premium Animated Status Loader */}
-        <OrderStatusLoader status={item.status} />
+          <View style={styles.divider} />
 
-        <View style={styles.divider} />
-
-        {/* Items List */}
-        <View style={styles.itemsSection}>
-          {item.items.map((prod, index) => (
-            <View key={index} style={styles.itemRow}>
-              <Text style={styles.itemName} numberOfLines={1}>
-                {typeof prod.name === 'object' && prod.name !== null
-                  ? (prod.name as any).en || (prod.name as any).mr || 'Product'
-                  : String(prod.name || 'Product')}
-              </Text>
-              <Text style={styles.itemQty}>× {prod.quantity}</Text>
-              <Text style={styles.itemPrice}>₹{prod.price * prod.quantity}</Text>
+          {/* Totals */}
+          <View style={styles.totalsBox}>
+            <View style={styles.breakdownRow}>
+              <Text style={styles.breakdownLabel}>{t('subtotal') || 'Subtotal'}: ₹{item.subtotal}</Text>
+              {item.deliveryFee > 0 && <Text style={styles.breakdownLabel}> | {t('deliveryFee') || 'Delivery'}: ₹{item.deliveryFee}</Text>}
+              {item.gstAmount > 0 && <Text style={styles.breakdownLabel}> | GST: ₹{item.gstAmount}</Text>}
+              {item.handlingFee > 0 && <Text style={styles.breakdownLabel}> | {t('handlingFee') || 'Handling'}: ₹{item.handlingFee}</Text>}
             </View>
-          ))}
-        </View>
-
-        <View style={styles.divider} />
-
-        {/* Address */}
-        {item.address && (
-          <View style={styles.addressBox}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-              <Ionicons name="home-outline" size={12} color="#94a3b8" />
-              <Text style={styles.addressLabel}>Delivery Address:</Text>
+            <View style={styles.grandTotalRow}>
+              <Text style={styles.totalLabel}>{t('total') || 'Amount'}</Text>
+              <Text style={styles.totalValue}>₹{item.totalAmount}</Text>
             </View>
-            <Text style={styles.addressText} numberOfLines={2}>{item.address}</Text>
-          </View>
-        )}
-
-        <View style={styles.divider} />
-
-        {/* Totals */}
-        <View style={styles.totalsBox}>
-          <View style={styles.breakdownRow}>
-            <Text style={styles.breakdownLabel}>Subtotal: ₹{item.subtotal}</Text>
-            {item.deliveryFee > 0 && <Text style={styles.breakdownLabel}> | Delivery: ₹{item.deliveryFee}</Text>}
-            {item.gstAmount > 0 && <Text style={styles.breakdownLabel}> | GST: ₹{item.gstAmount}</Text>}
-            {item.handlingFee > 0 && <Text style={styles.breakdownLabel}> | Handling: ₹{item.handlingFee}</Text>}
-          </View>
-          <View style={styles.grandTotalRow}>
-            <Text style={styles.totalLabel}>Amount</Text>
-            <Text style={styles.totalValue}>₹{item.totalAmount}</Text>
           </View>
         </View>
-      </View>
-    );
-  }, [tick, handleCancelOrder, t]);
+      );
+    },
+    [tick, handleCancelOrder, t, tProduct, language]
+  );
 
   return (
     <View style={styles.container}>
@@ -397,41 +471,48 @@ export default function OrdersScreen() {
         <ScrollView
           contentContainerStyle={styles.emptyContainer}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={() => fetchOrders(true)} tintColor="#a855f7" />
+            <RefreshControl refreshing={refreshing} onRefresh={() => syncOrders(true)} tintColor="#a855f7" />
           }
         >
           <View style={styles.emptyIconContainer}>
-            <Ionicons name="receipt-outline" size={64} color="#a855f7" />
+            <Ionicons name="receipt-outline" size={60} color="#a855f7" />
           </View>
           <Text style={styles.emptyTitle}>{t('ordersEmpty') || 'No orders found'}</Text>
           <Text style={styles.emptySub}>
-            You have not placed any orders yet. Once you place an order, it will appear here.
+            {language === 'mr'
+              ? 'तुम्ही अद्याप या डिव्हाइसवरून कोणतीही ऑर्डर दिलेली नाही. तुम्ही ऑर्डर दिल्यावर ती येथे दिसेल.'
+              : language === 'hi'
+                ? 'आपने अभी तक इस डिवाइस से कोई ऑर्डर नहीं दिया है। जब आप ऑर्डर देंगे, तो वह यहाँ दिखाई देगा।'
+                : 'You have not placed any orders yet. Once you place an order, it will appear here.'}
           </Text>
+
           <TouchableOpacity
             style={styles.retryBtn}
-            onPress={() => fetchOrders(false)}
+            onPress={() => syncOrders(true)}
             activeOpacity={0.85}
           >
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <Ionicons name="refresh-outline" size={16} color="#ffffff" />
-              <Text style={styles.retryBtnText}>Refresh</Text>
+              <Text style={styles.retryBtnText}>
+                {language === 'mr' ? 'रिफ्रेश करा' : language === 'hi' ? 'रिफ्रेश करें' : 'Refresh'}
+              </Text>
             </View>
           </TouchableOpacity>
         </ScrollView>
       ) : (
         <FlatList
-          data={visibleOrders}
+          data={orders}
           keyExtractor={(item) => item._id}
           renderItem={renderOrderItem}
           extraData={tick}
           contentContainerStyle={[styles.listContainer, { paddingBottom: 75 + insets.bottom }]}
           showsVerticalScrollIndicator={false}
           initialNumToRender={5}
-          maxToRenderPerBatch={5}
+          maxToRenderPerBatch={10}
           windowSize={5}
           removeClippedSubviews
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={() => fetchOrders(true)} tintColor="#a855f7" />
+            <RefreshControl refreshing={refreshing} onRefresh={() => syncOrders(true)} tintColor="#a855f7" />
           }
         />
       )}
@@ -442,31 +523,54 @@ export default function OrdersScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f1f5f9' },
   header: {
-    paddingHorizontal: 20, paddingBottom: 16,
+    paddingHorizontal: 20,
+    paddingBottom: 16,
     backgroundColor: '#ffffff',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
   },
   headerTitle: { fontSize: 22, fontWeight: '800', color: '#0f172a' },
   contactContainer: {
-    margin: 16, marginBottom: 8, backgroundColor: '#faf5ff',
-    borderRadius: 14, padding: 16, borderWidth: 1, borderColor: '#e9d5ff',
-    shadowColor: '#a855f7', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 6, elevation: 1,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    margin: 16,
+    marginBottom: 8,
+    backgroundColor: '#faf5ff',
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#e9d5ff',
+    shadowColor: '#a855f7',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   contactText: { fontSize: 14, color: '#6b21a8', lineHeight: 20, fontWeight: '500' },
   contactPhone: { fontWeight: '800', color: '#a855f7' },
   listContainer: { padding: 16, paddingBottom: 75 },
   orderCard: {
-    backgroundColor: '#ffffff', borderRadius: 16, padding: 16, marginBottom: 12,
-    borderWidth: 1, borderColor: '#e2e8f0',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.03, shadowRadius: 6, elevation: 1,
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 6,
+    elevation: 1,
   },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   orderId: { fontSize: 16, fontWeight: '800', color: '#0f172a' },
   orderDate: { fontSize: 12, color: '#94a3b8', marginTop: 2 },
   statusBadge: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
   statusText: { fontSize: 12, fontWeight: '700', textTransform: 'capitalize' },
-  // (legacy timeline styles kept for fallback reference)
   divider: { height: 1, backgroundColor: '#f1f5f9', marginVertical: 12 },
   itemsSection: { gap: 8 },
   itemRow: { flexDirection: 'row', alignItems: 'center' },
@@ -482,17 +586,39 @@ const styles = StyleSheet.create({
   grandTotalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 },
   totalLabel: { fontSize: 14, fontWeight: '700', color: '#0f172a' },
   totalValue: { fontSize: 18, fontWeight: '800', color: '#a855f7' },
-  loader: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, minHeight: 300, paddingBottom: 80 },
+  emptyContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+    minHeight: 400,
+    paddingBottom: 80,
+  },
   emptyIconContainer: {
-    width: 110, height: 110, borderRadius: 55,
-    backgroundColor: '#faf5ff', alignItems: 'center', justifyContent: 'center',
-    marginBottom: 20, borderWidth: 2, borderColor: '#f3e8ff',
-    shadowColor: '#a855f7', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.06, shadowRadius: 12, elevation: 2,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: '#faf5ff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+    borderWidth: 2,
+    borderColor: '#f3e8ff',
+    shadowColor: '#a855f7',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 2,
   },
   emptyTitle: { fontSize: 20, fontWeight: '800', color: '#0f172a', marginBottom: 6 },
-  emptySub: { fontSize: 14, color: '#94a3b8', textAlign: 'center', marginBottom: 20, lineHeight: 20 },
-  retryBtn: { backgroundColor: '#a855f7', borderRadius: 10, paddingVertical: 10, paddingHorizontal: 20, justifyContent: 'center', alignItems: 'center' },
+  emptySub: { fontSize: 14, color: '#94a3b8', textAlign: 'center', marginBottom: 20, lineHeight: 20, paddingHorizontal: 16 },
+  retryBtn: {
+    backgroundColor: '#a855f7',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   retryBtnText: { color: '#ffffff', fontSize: 14, fontWeight: '700' },
   cancelBtn: {
     flexDirection: 'row',

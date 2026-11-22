@@ -17,7 +17,7 @@ export default function SuccessScreen({ navigation, route }: Props) {
   const { orderId } = route.params;
   const scaleAnim = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const { t } = useLanguage();
+  const { language, t } = useLanguage();
 
   const [timeLeft, setTimeLeft] = useState(120);
   const [cancelled, setCancelled] = useState(false);
@@ -97,7 +97,9 @@ export default function SuccessScreen({ navigation, route }: Props) {
           {cancelled ? t("Order Cancelled") : t('orderPlaced')}
         </Text>
         <Text style={styles.subtitle}>
-          {cancelled ? ("Your order has been cancelled successfully.") : t('orderPlacedSub')}
+          {cancelled
+            ? (language === 'mr' ? 'तुमची ऑर्डर यशस्वीरीत्या रद्द केली गेली आहे.' : language === 'hi' ? 'आपका ऑर्डर सफलतापूर्वक रद्द कर दिया गया है।' : 'Your order has been cancelled successfully.')
+            : t('orderPlacedSub')}
         </Text>
 
         <View style={styles.orderIdBox}>
@@ -108,7 +110,9 @@ export default function SuccessScreen({ navigation, route }: Props) {
         {!cancelled && (
           <View style={styles.paymentBadge}>
             <Ionicons name="wallet-outline" size={16} color="#16a34a" />
-            <Text style={styles.paymentBadgeText}>Payment: Cash / UPI (GPay, PhonePe) on Delivery</Text>
+            <Text style={styles.paymentBadgeText}>
+              {language === 'mr' ? 'पेमेंट: डिलिव्हरीच्या वेळी Cash / UPI (GPay, PhonePe)' : language === 'hi' ? 'भुगतान: डिलीवरी पर Cash / UPI (GPay, PhonePe)' : 'Payment: Cash / UPI (GPay, PhonePe) on Delivery'}
+            </Text>
           </View>
         )}
 
@@ -142,7 +146,7 @@ export default function SuccessScreen({ navigation, route }: Props) {
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <Ionicons name="close-circle-outline" size={18} color="#dc2626" />
               <Text style={styles.cancelBtnText}>
-                Cancel Order ({formatTime(timeLeft)})
+                {t('Cancel Order') || 'Cancel Order'} ({formatTime(timeLeft)})
               </Text>
             </View>
           </TouchableOpacity>

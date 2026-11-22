@@ -45,7 +45,7 @@ export default function ProductDetailScreen({ route, navigation }: Props) {
   const [qty, setQty] = useState(1);
   const [added, setAdded] = useState(false);
   const { addToCart, clearCart } = useCart();
-  const { t, tProduct, tCategory } = useLanguage();
+  const { language, t, tProduct, tCategory } = useLanguage();
   const insets = useSafeAreaInsets();
   const topOffset = insets.top > 0 ? insets.top + 8 : 16;
 
@@ -128,7 +128,7 @@ export default function ProductDetailScreen({ route, navigation }: Props) {
     if (!product) return;
     const currentImg = imagesList[activeIndex] || product.image;
     for (let i = 0; i < qty; i++) {
-      addToCart({ _id: product._id, name: product.name, price: product.price, image: currentImg });
+      addToCart({ _id: product._id, name: product.name, price: product.price, image: currentImg, category: product.category });
     }
     setAdded(true);
     setTimeout(() => setAdded(false), 1500);
@@ -138,7 +138,7 @@ export default function ProductDetailScreen({ route, navigation }: Props) {
     if (!product) return;
     clearCart();
     const currentImg = imagesList[activeIndex] || product.image;
-    addToCart({ _id: product._id, name: product.name, price: product.price, image: currentImg });
+    addToCart({ _id: product._id, name: product.name, price: product.price, image: currentImg, category: product.category });
     navigation.navigate('Checkout');
   };
 
@@ -147,7 +147,9 @@ export default function ProductDetailScreen({ route, navigation }: Props) {
       <View style={styles.container}>
         <View style={styles.loadingState}>
           <Ionicons name="leaf-outline" size={40} color="#a855f7" />
-          <Text style={styles.loadingText}>Loading product...</Text>
+          <Text style={styles.loadingText}>
+            {language === 'mr' ? 'उत्पादन लोड होत आहे...' : language === 'hi' ? 'उत्पाद लोड हो रहा है...' : 'Loading product...'}
+          </Text>
         </View>
       </View>
     );
@@ -276,12 +278,16 @@ export default function ProductDetailScreen({ route, navigation }: Props) {
           {/* Delivery Promise */}
           <View style={styles.deliveryBox}>
             <Ionicons name="bicycle" size={18} color="#166534" />
-            <Text style={styles.deliveryText}>Free Delivery in 15–30 mins</Text>
+            <Text style={styles.deliveryText}>
+              {language === 'mr' ? '१५–३० मिनिटांत मोफत डिलिव्हरी' : language === 'hi' ? '१५–३० मिनट में मुफ़्त डिलीवरी' : 'Free Delivery in 15–30 mins'}
+            </Text>
           </View>
 
           {product.description ? (
             <View style={styles.descContainer}>
-              <Text style={styles.descTitle}>Product Information</Text>
+              <Text style={styles.descTitle}>
+                {language === 'mr' ? 'उत्पादनाची माहिती' : language === 'hi' ? 'उत्पाद विवरण' : 'Product Information'}
+              </Text>
               <Text style={styles.description}>{product.description}</Text>
             </View>
           ) : null}
@@ -292,11 +298,15 @@ export default function ProductDetailScreen({ route, navigation }: Props) {
           <View style={styles.guarantees}>
             <View style={styles.guaranteeItem}>
               <Ionicons name="shield-checkmark-outline" size={15} color="#7c3aed" />
-              <Text style={styles.guaranteeText}>100% Quality Checked</Text>
+              <Text style={styles.guaranteeText}>
+                {language === 'mr' ? '१००% गुणवत्ता तपासणी' : language === 'hi' ? '१००% गुणवत्ता जांची गई' : '100% Quality Checked'}
+              </Text>
             </View>
             <View style={styles.guaranteeItem}>
               <Ionicons name="refresh-outline" size={15} color="#7c3aed" />
-              <Text style={styles.guaranteeText}>Easy Return & Refund</Text>
+              <Text style={styles.guaranteeText}>
+                {language === 'mr' ? 'सुलभ परतावा आणि रिफंड' : language === 'hi' ? 'आसान वापसी और रिफंड' : 'Easy Return & Refund'}
+              </Text>
             </View>
           </View>
 
@@ -345,7 +355,7 @@ export default function ProductDetailScreen({ route, navigation }: Props) {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
             <Ionicons name="flash-outline" size={18} color="#ffffff" />
             <Text style={styles.buyBtnText}>
-              Buy Now
+              {language === 'mr' ? 'आत्ताच खरेदी करा' : language === 'hi' ? 'अभी खरीदें' : 'Buy Now'}
             </Text>
           </View>
         </TouchableOpacity>

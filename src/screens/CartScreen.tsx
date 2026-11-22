@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
-  ScrollView
+  ScrollView, Alert
 } from 'react-native';
 import PremiumImage from '../components/PremiumImage';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -13,6 +13,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import PremiumLoader from '../components/PremiumLoader';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import CheckoutDisabledModal from '../components/CheckoutDisabledModal';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'Main'> };
 
@@ -23,6 +24,8 @@ export default function CartScreen({ navigation }: Props) {
   
   const [settings, setSettings] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [showDisabledModal, setShowDisabledModal] = useState(false);
+  const [checkoutDisabledMessage, setCheckoutDisabledMessage] = useState('');
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -38,7 +41,53 @@ export default function CartScreen({ navigation }: Props) {
 
       const params = storeId ? { store: storeId } : undefined;
       getSettings(params)
-        .then(res => setSettings(res.data))
+        .then(async (res) => {
+          let data = res.data;
+          let globalData: any = null;
+          try {
+            const globalRes = await getSettings();
+            globalData = globalRes?.data;
+          } catch (e) {}
+
+          const isGloballyDisabled = Boolean(globalData?.checkoutDisabled);
+          const isDisabled = Boolean(data?.checkoutDisabled || isGloballyDisabled);
+
+          const storeBannerMsg =
+            data?.banners?.find((b: any) => b.isCheckoutNotice)?.message?.trim() ||
+            data?.banners?.find((b: any) => b.isCheckoutNotice)?.subtitle?.trim();
+
+          const globalBannerMsg =
+            globalData?.banners?.find((b: any) => b.isCheckoutNotice)?.message?.trim() ||
+            globalData?.banners?.find((b: any) => b.isCheckoutNotice)?.subtitle?.trim();
+
+          const storeCustomMsg =
+            data?.checkoutDisabledMessage &&
+            data.checkoutDisabledMessage !== 'We are currently not accepting new orders. Please check back shortly!'
+              ? data.checkoutDisabledMessage.trim()
+              : '';
+
+          const globalCustomMsg =
+            globalData?.checkoutDisabledMessage &&
+            globalData.checkoutDisabledMessage !== 'We are currently not accepting new orders. Please check back shortly!'
+              ? globalData.checkoutDisabledMessage.trim()
+              : '';
+
+          const resolvedMsg =
+            storeBannerMsg ||
+            globalBannerMsg ||
+            storeCustomMsg ||
+            globalCustomMsg ||
+            data?.checkoutDisabledMessage?.trim() ||
+            globalData?.checkoutDisabledMessage?.trim() ||
+            '';
+
+          setSettings({
+            ...data,
+            checkoutDisabled: isDisabled,
+            checkoutDisabledMessage: resolvedMsg,
+          });
+          setCheckoutDisabledMessage(resolvedMsg);
+        })
         .catch(console.error)
         .finally(() => setLoading(false));
     };
@@ -137,11 +186,11 @@ export default function CartScreen({ navigation }: Props) {
 
           {/* Bill Details */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Bill Details</Text>
+            <Text style={styles.sectionTitle}>{t('billDetails')}</Text>
             <View style={styles.billRow}>
               <View style={styles.billRowIcon}>
                 <Ionicons name="receipt-outline" size={16} color="#64748b" />
-                <Text style={styles.billLabel}>Item Total</Text>
+                <Text style={styles.billLabel}>{t('itemTotal')}</Text>
               </View>
               <View style={styles.billRowValue}>
                 {totalSavings > 0 && <Text style={styles.billMrp}>₹{totalAmount + totalSavings}</Text>}
@@ -152,11 +201,11 @@ export default function CartScreen({ navigation }: Props) {
             <View style={styles.billRow}>
               <View style={styles.billRowIcon}>
                 <Ionicons name="bicycle-outline" size={16} color="#64748b" />
-                <Text style={styles.billLabel}>Delivery Fee</Text>
+                <Text style={styles.billLabel}>{t('deliveryFee')}</Text>
               </View>
               <Text style={styles.billValue}>
                 {deliveryFee === 0 ? (
-                  <Text style={{ color: '#16a34a' }}>FREE</Text>
+                  <Text style={{ color: '#16a34a' }}>{t('free')}</Text>
                 ) : (
                   <Text>{`₹${deliveryFee}`}</Text>
                 )}
@@ -167,7 +216,7 @@ export default function CartScreen({ navigation }: Props) {
               <View style={styles.billRow}>
                 <View style={styles.billRowIcon}>
                   <Ionicons name="briefcase-outline" size={16} color="#64748b" />
-                  <Text style={styles.billLabel}>Handling Fee</Text>
+                  <Text style={styles.billLabel}>{t('handlingFee')}</Text>
                 </View>
                 <Text style={styles.billValue}>₹{handlingFee}</Text>
               </View>
@@ -177,21 +226,27 @@ export default function CartScreen({ navigation }: Props) {
               <View style={styles.billRow}>
                 <View style={styles.billRowIcon}>
                   <Ionicons name="document-text-outline" size={16} color="#64748b" />
-                  <Text style={styles.billLabel}>Taxes (GST)</Text>
+                  <Text style={styles.billLabel}>{t('taxesGst')}</Text>
                 </View>
                 <Text style={styles.billValue}>₹{gst.toFixed(2)}</Text>
               </View>
             )}
 
             <View style={[styles.billRow, styles.grandTotalRow]}>
-              <Text style={styles.grandTotalLabel}>Grand Total</Text>
+              <Text style={styles.grandTotalLabel}>{t('grandTotal')}</Text>
               <Text style={styles.grandTotalValue}>₹{grandTotal.toFixed(2)}</Text>
             </View>
 
             {totalSavings > 0 && (
               <View style={styles.savingsBox}>
                 <Ionicons name="pricetag" size={16} color="#16a34a" />
-                <Text style={styles.savingsText}>You are saving ₹{totalSavings} on this order!</Text>
+                <Text style={styles.savingsText}>
+                  {language === 'mr'
+                    ? `तुम्ही या ऑर्डरवर ₹${totalSavings} वाचवत आहात!`
+                    : language === 'hi'
+                    ? `आप इस ऑर्डर पर ₹${totalSavings} बचा रहे हैं!`
+                    : `You are saving ₹${totalSavings} on this order!`}
+                </Text>
               </View>
             )}
           </View>
@@ -202,12 +257,77 @@ export default function CartScreen({ navigation }: Props) {
         <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 16) }]}>
           <TouchableOpacity
             style={styles.checkoutBtn}
-            onPress={() => navigation.navigate('Checkout')}
+            onPress={async () => {
+              if (settings?.checkoutDisabled) {
+                setShowDisabledModal(true);
+                return;
+              }
+
+              // Realtime check before navigation in case admin disabled while user was on cart
+              try {
+                const savedStore = await AsyncStorage.getItem('active_store');
+                const storeId = savedStore ? JSON.parse(savedStore)._id : undefined;
+                const freshRes = await getSettings(storeId ? { store: storeId } : undefined);
+                let freshData = freshRes?.data;
+                let globalData: any = null;
+                try {
+                  const globalRes = await getSettings();
+                  globalData = globalRes?.data;
+                } catch (e) {}
+
+                const isGloballyDisabled = Boolean(globalData?.checkoutDisabled);
+                const isDisabled = Boolean(freshData?.checkoutDisabled || isGloballyDisabled);
+
+                if (isDisabled) {
+                  const storeBannerMsg =
+                    freshData?.banners?.find((b: any) => b.isCheckoutNotice)?.message?.trim() ||
+                    freshData?.banners?.find((b: any) => b.isCheckoutNotice)?.subtitle?.trim();
+
+                  const globalBannerMsg =
+                    globalData?.banners?.find((b: any) => b.isCheckoutNotice)?.message?.trim() ||
+                    globalData?.banners?.find((b: any) => b.isCheckoutNotice)?.subtitle?.trim();
+
+                  const storeCustomMsg =
+                    freshData?.checkoutDisabledMessage &&
+                    freshData.checkoutDisabledMessage !== 'We are currently not accepting new orders. Please check back shortly!'
+                      ? freshData.checkoutDisabledMessage.trim()
+                      : '';
+
+                  const globalCustomMsg =
+                    globalData?.checkoutDisabledMessage &&
+                    globalData.checkoutDisabledMessage !== 'We are currently not accepting new orders. Please check back shortly!'
+                      ? globalData.checkoutDisabledMessage.trim()
+                      : '';
+
+                  const resolvedMsg =
+                    storeBannerMsg ||
+                    globalBannerMsg ||
+                    storeCustomMsg ||
+                    globalCustomMsg ||
+                    freshData?.checkoutDisabledMessage?.trim() ||
+                    globalData?.checkoutDisabledMessage?.trim() ||
+                    '';
+
+                  setSettings({
+                    ...freshData,
+                    checkoutDisabled: true,
+                    checkoutDisabledMessage: resolvedMsg,
+                  });
+                  setCheckoutDisabledMessage(resolvedMsg);
+                  setShowDisabledModal(true);
+                  return;
+                }
+              } catch (e) {}
+
+              navigation.navigate('Checkout');
+            }}
             activeOpacity={0.85}
           >
             <View>
               <Text style={styles.checkoutAmount}>₹{grandTotal.toFixed(2)}</Text>
-              <Text style={styles.checkoutSub}>TOTAL</Text>
+              <Text style={styles.checkoutSub}>
+                {language === 'mr' ? 'एकूण' : language === 'hi' ? 'कुल' : 'TOTAL'}
+              </Text>
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <Text style={styles.checkoutBtnText}>
@@ -218,6 +338,13 @@ export default function CartScreen({ navigation }: Props) {
           </TouchableOpacity>
         </View>
       )}
+
+      {/* Checkout Disabled Popup Modal */}
+      <CheckoutDisabledModal
+        visible={showDisabledModal}
+        onClose={() => setShowDisabledModal(false)}
+        message={checkoutDisabledMessage || settings?.checkoutDisabledMessage}
+      />
     </View>
   );
 }
@@ -271,6 +398,38 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 10,
   },
   checkoutBtn: { backgroundColor: '#a855f7', borderRadius: 14, paddingHorizontal: 20, paddingVertical: 14, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  checkoutBtnPaused: { backgroundColor: '#dc2626' },
+  disabledBanner: {
+    backgroundColor: '#fef2f2',
+    borderWidth: 1,
+    borderColor: '#fecaca',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  disabledBannerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+    marginRight: 8,
+  },
+  disabledBannerText: {
+    fontSize: 12,
+    color: '#dc2626',
+    fontWeight: '600',
+    flex: 1,
+  },
+  disabledBannerLink: {
+    fontSize: 11,
+    color: '#b91c1c',
+    fontWeight: '700',
+    textDecorationLine: 'underline',
+  },
   checkoutAmount: { color: '#ffffff', fontSize: 16, fontWeight: '800', marginBottom: 2 },
   checkoutSub: { color: '#ffffff', fontSize: 10, fontWeight: '700', opacity: 0.8 },
   checkoutBtnText: { color: '#fff', fontSize: 16, fontWeight: '800' },

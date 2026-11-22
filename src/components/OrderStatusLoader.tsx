@@ -8,6 +8,7 @@ import {
   Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useLanguage } from '../hooks/useLanguage';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -101,6 +102,105 @@ const PROGRESS_STEPS: OrderStatus[] = [
   'out_for_delivery',
   'delivered',
 ];
+
+const STATUS_TEXTS: Record<string, Record<OrderStatus, { label: string; headline: string; subtext: string }>> = {
+  en: {
+    pending: {
+      label: 'Pending',
+      headline: '🕐 Order Received!',
+      subtext: 'We got your order and are reviewing it right now…',
+    },
+    confirmed: {
+      label: 'Confirmed',
+      headline: '✅ Order Confirmed!',
+      subtext: 'Your order has been confirmed and is being processed…',
+    },
+    out_for_delivery: {
+      label: 'Out for Delivery',
+      headline: '🚴 On the Way!',
+      subtext: 'Your delivery partner is heading to your doorstep…',
+    },
+    delivered: {
+      label: 'Delivered',
+      headline: '🎉 Delivered Successfully!',
+      subtext: 'Enjoy your order! Thank you for shopping with us.',
+    },
+    closed: {
+      label: 'Closed',
+      headline: '✅ Order Closed',
+      subtext: 'This order has been completed and closed.',
+    },
+    cancelled: {
+      label: 'Cancelled',
+      headline: '❌ Order Cancelled',
+      subtext: 'This order was cancelled. We hope to serve you again!',
+    },
+  },
+  mr: {
+    pending: {
+      label: 'प्रलंबित',
+      headline: '🕐 ऑर्डर प्राप्त झाली!',
+      subtext: 'आम्हाला तुमची ऑर्डर मिळाली असून आम्ही तिची तपासणी करत आहोत…',
+    },
+    confirmed: {
+      label: 'निश्चित झाली',
+      headline: '✅ ऑर्डर कन्फर्म झाली!',
+      subtext: 'तुमची ऑर्डर निश्चित झाली असून ती तयार केली जात आहे…',
+    },
+    out_for_delivery: {
+      label: 'मार्गावर',
+      headline: '🚴 डिलिव्हरी मार्गावर!',
+      subtext: 'आमचा डिलिव्हरी पार्टनर तुमच्या पत्त्यावर पोहोचत आहे…',
+    },
+    delivered: {
+      label: 'वितरित',
+      headline: '🎉 ऑर्डर यशस्वीरीत्या मिळाली!',
+      subtext: 'ऑर्डरचा आनंद घ्या! फर्स्टमार्टवरून खरेदी केल्याबद्दल धन्यवाद.',
+    },
+    closed: {
+      label: 'पूर्ण झाली',
+      headline: '✅ ऑर्डर पूर्ण झाली',
+      subtext: 'ही ऑर्डर पूर्ण झाली असून बंद करण्यात आली आहे.',
+    },
+    cancelled: {
+      label: 'रद्द झाली',
+      headline: '❌ ऑर्डर रद्द केली',
+      subtext: 'ही ऑर्डर रद्द झाली आहे. पुन्हा सेवा देण्याची संधी मिळावी!',
+    },
+  },
+  hi: {
+    pending: {
+      label: 'लंबित',
+      headline: '🕐 ऑर्डर प्राप्त हुआ!',
+      subtext: 'हमें आपका ऑर्डर मिल गया है और हम इसकी समीक्षा कर रहे हैं…',
+    },
+    confirmed: {
+      label: 'पुष्ट हुआ',
+      headline: '✅ ऑर्डर कन्फर्म हुआ!',
+      subtext: 'आपका ऑर्डर कन्फर्म हो गया है और तैयार किया जा रहा है…',
+    },
+    out_for_delivery: {
+      label: 'रास्ते में',
+      headline: '🚴 डिलीवरी रास्ते में!',
+      subtext: 'हमारा डिलीवरी पार्टनर आपके पते की ओर निकल चुका है…',
+    },
+    delivered: {
+      label: 'वितरित',
+      headline: '🎉 सफलतापूर्वक डिलीवर हुआ!',
+      subtext: 'अपने ऑर्डर का आनंद लें! हमारे साथ खरीदारी के लिए धन्यवाद।',
+    },
+    closed: {
+      label: 'बंद हुआ',
+      headline: '✅ ऑर्डर पूर्ण हुआ',
+      subtext: 'यह ऑर्डर पूरा हो गया है और बंद कर दिया गया है।',
+    },
+    cancelled: {
+      label: 'रद्द हुआ',
+      headline: '❌ ऑर्डर रद्द हुआ',
+      subtext: 'यह ऑर्डर रद्द कर दिया गया था। हम फिर से आपकी सेवा की आशा करते हैं!',
+    },
+  },
+};
 
 // ─── Step Dot ────────────────────────────────────────────────────────────────
 function StepDot({
@@ -320,7 +420,10 @@ interface OrderStatusLoaderProps {
 }
 
 export default function OrderStatusLoader({ status }: OrderStatusLoaderProps) {
+  const { language } = useLanguage();
   const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.pending;
+  const langTexts = STATUS_TEXTS[language] || STATUS_TEXTS.en;
+  const currentText = langTexts[status] || langTexts.pending;
 
   // Animation refs
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -522,8 +625,8 @@ export default function OrderStatusLoader({ status }: OrderStatusLoaderProps) {
       </View>
 
       {/* Headline + subtext */}
-      <Text style={styles.headline}>{cfg.headline}</Text>
-      <Text style={styles.subtext}>{cfg.subtext}</Text>
+      <Text style={styles.headline}>{currentText.headline}</Text>
+      <Text style={styles.subtext}>{currentText.subtext}</Text>
 
       {/* Progress stepper (only for non-cancelled/closed) */}
       {status !== 'cancelled' && status !== 'closed' && (
@@ -555,7 +658,7 @@ export default function OrderStatusLoader({ status }: OrderStatusLoaderProps) {
                       ]}
                       numberOfLines={2}
                     >
-                      {STATUS_CONFIG[s].label}
+                      {(langTexts[s] || STATUS_CONFIG[s]).label}
                     </Text>
                   </View>
                   {idx < PROGRESS_STEPS.length - 1 && (
