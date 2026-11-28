@@ -274,13 +274,15 @@ export default function ProductDetailScreen({ route, navigation }: Props) {
               </View>
             )}
           </View>
-
-          {/* Delivery Promise */}
-          <View style={styles.deliveryBox}>
-            <Ionicons name="bicycle" size={18} color="#166534" />
-            <Text style={styles.deliveryText}>
-              {language === 'mr' ? '१५–३० मिनिटांत मोफत डिलिव्हरी' : language === 'hi' ? '१५–३० मिनट में मुफ़्त डिलीवरी' : 'Free Delivery in 15–30 mins'}
-            </Text>
+          <Text style={styles.qtyLabel}>{t('quantity')}</Text>
+          <View style={styles.qtyRow}>
+            <TouchableOpacity style={styles.qtyBtn} onPress={() => setQty((q) => Math.max(1, q - 1))}>
+              <Text style={styles.qtyBtnText}>−</Text>
+            </TouchableOpacity>
+            <Text style={styles.qtyVal}>{qty}</Text>
+            <TouchableOpacity style={styles.qtyBtn} onPress={() => setQty((q) => q + 1)}>
+              <Text style={styles.qtyBtnText}>+</Text>
+            </TouchableOpacity>
           </View>
 
           {product.description ? (
@@ -292,36 +294,9 @@ export default function ProductDetailScreen({ route, navigation }: Props) {
             </View>
           ) : null}
 
-          <View style={styles.divider} />
 
-          {/* Guarantees */}
-          <View style={styles.guarantees}>
-            <View style={styles.guaranteeItem}>
-              <Ionicons name="shield-checkmark-outline" size={15} color="#7c3aed" />
-              <Text style={styles.guaranteeText}>
-                {language === 'mr' ? '१००% गुणवत्ता तपासणी' : language === 'hi' ? '१००% गुणवत्ता जांची गई' : '100% Quality Checked'}
-              </Text>
-            </View>
-            <View style={styles.guaranteeItem}>
-              <Ionicons name="refresh-outline" size={15} color="#7c3aed" />
-              <Text style={styles.guaranteeText}>
-                {language === 'mr' ? 'सुलभ परतावा आणि रिफंड' : language === 'hi' ? 'आसान वापसी और रिफंड' : 'Easy Return & Refund'}
-              </Text>
-            </View>
-          </View>
 
-          <View style={styles.divider} />
 
-          <Text style={styles.qtyLabel}>{t('quantity')}</Text>
-          <View style={styles.qtyRow}>
-            <TouchableOpacity style={styles.qtyBtn} onPress={() => setQty((q) => Math.max(1, q - 1))}>
-              <Text style={styles.qtyBtnText}>−</Text>
-            </TouchableOpacity>
-            <Text style={styles.qtyVal}>{qty}</Text>
-            <TouchableOpacity style={styles.qtyBtn} onPress={() => setQty((q) => q + 1)}>
-              <Text style={styles.qtyBtnText}>+</Text>
-            </TouchableOpacity>
-          </View>
 
           <View style={styles.totalRow}>
             <Text style={styles.totalLabel}>{t('totalAmountLabel')}</Text>

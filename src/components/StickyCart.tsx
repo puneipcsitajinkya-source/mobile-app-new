@@ -32,7 +32,7 @@ export default function StickyCart({
       >
         <View style={styles.info}>
           <View style={[styles.iconWrap, { backgroundColor: tintColor }]}> 
-            <Ionicons name="cart-outline" size={13} color="#ffffff" />
+            <Ionicons name="cart-outline" size={16} color="#ffffff" />
             <View style={styles.countBadge}>
               <Text style={styles.countText}>{totalItems}</Text>
             </View>
@@ -47,7 +47,7 @@ export default function StickyCart({
           <Text style={[styles.actionText, { color: tintColor }]}>
             {language === 'mr' ? 'उघडा' : language === 'hi' ? 'खोलें' : 'Open'}
           </Text>
-          <Ionicons name="chevron-forward" size={11} color={tintColor} />
+          <Ionicons name="chevron-forward" size={13} color={tintColor} />
         </View>
       </TouchableOpacity>
     </View>
@@ -65,20 +65,21 @@ const styles = StyleSheet.create({
   },
   button: {
     width: '100%',
-    maxWidth: 300,
+    maxWidth: 330,
+    minHeight: 52,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 7,
-    paddingHorizontal: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
     borderRadius: 999,
     borderWidth: 1,
     backgroundColor: '#ffffff',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    elevation: 3,
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
   },
   info: {
     flexDirection: 'row',
@@ -86,57 +87,57 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   iconWrap: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
   },
   countBadge: {
     position: 'absolute',
-    top: -2,
-    right: -2,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+    top: -3,
+    right: -3,
+    width: 15,
+    height: 15,
+    borderRadius: 7.5,
     backgroundColor: '#ef4444',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: '#ffffff',
   },
   countText: {
     color: '#ffffff',
-    fontSize: 8,
-    fontWeight: '700',
+    fontSize: 9,
+    fontWeight: '800',
   },
   summary: {
-    marginLeft: 8,
+    marginLeft: 10,
     flex: 1,
   },
   label: {
-    fontSize: 9,
+    fontSize: 10,
     fontWeight: '700',
     textTransform: 'uppercase',
-    letterSpacing: 0.3,
+    letterSpacing: 0.4,
   },
   totalText: {
     color: '#0f172a',
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '800',
     marginTop: 1,
   },
   action: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 6,
-    paddingVertical: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     borderRadius: 999,
   },
   actionText: {
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: '700',
-    marginRight: 2,
+    marginRight: 3,
   },
 });

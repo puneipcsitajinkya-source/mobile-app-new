@@ -2,7 +2,8 @@ import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import {
   View, Text, FlatList, TouchableOpacity,
   StyleSheet, RefreshControl, Dimensions, Image,
-  ScrollView, NativeSyntheticEvent, NativeScrollEvent
+  ScrollView, NativeSyntheticEvent, NativeScrollEvent,
+  TextInput
 } from 'react-native';
 import PremiumImage from '../components/PremiumImage';
 import StickyCart from '../components/StickyCart';
@@ -30,6 +31,7 @@ interface Product {
   mrp?: number;
   discount?: number;
   unit?: string;
+  brand?: string;
   image?: string;
   images?: string[];
   category: string;
@@ -279,6 +281,7 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
   const [refreshing, setRefreshing] = useState(false);
   const [subcategories, setSubcategories] = useState<Subcategory[]>([]);
   const [selectedSubcategory, setSelectedSubcategory] = useState<string>('');
+  const [searchQuery, setSearchQuery] = useState('');
   const { addToCart, items: cart, totalItems, totalAmount: cartTotal, increaseQty, decreaseQty } = useCart();
   const { language, tProduct, tCategory } = useLanguage();
 
@@ -364,8 +367,25 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
       // selectedSubcategory stores subcategory _id or empty for all
       filtered = filtered.filter((p) => (p.subcategory || '') === selectedSubcategory);
     }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      filtered = filtered.filter((p) => {
+        const enName = typeof p.name === 'object' ? (p.name.en || '') : (p.name || '');
+        const mrName = typeof p.name === 'object' ? (p.name.mr || '') : '';
+        const desc = p.description || '';
+        const brand = p.brand || '';
+        const unit = p.unit || '';
+        return (
+          enName.toLowerCase().includes(q) ||
+          mrName.toLowerCase().includes(q) ||
+          desc.toLowerCase().includes(q) ||
+          brand.toLowerCase().includes(q) ||
+          unit.toLowerCase().includes(q)
+        );
+      });
+    }
     return filtered;
-  }, [products, selectedSubcategory]);
+  }, [products, selectedSubcategory, searchQuery]);
 
   const getProductQty = useCallback((id: string) => {
     const item = cart.find(c => c._id === id);
@@ -413,6 +433,43 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
 
   return (
     <View style={styles.container}>
+      {/* Category In-Screen Search Bar */}
+      <View style={styles.searchHeader}>
+        <View style={styles.searchBar}>
+          <Ionicons name="search" size={17} color="#94a3b8" style={styles.searchIcon} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder={
+              language === 'mr'
+                ? `"${tCategory(categoryName)}" मध्ये शोधा...`
+                : language === 'hi'
+                ? `"${tCategory(categoryName)}" में खोजें...`
+                : `Search in ${tCategory(categoryName)}...`
+            }
+            placeholderTextColor="#94a3b8"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            returnKeyType="search"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity
+              onPress={() => setSearchQuery('')}
+              style={styles.clearSearchBtn}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Ionicons name="close-circle" size={18} color="#94a3b8" />
+            </TouchableOpacity>
+          )}
+        </View>
+        {searchQuery.length > 0 && (
+          <Text style={styles.searchResultCount}>
+            {filteredProducts.length} {language === 'mr' ? 'आयटम' : language === 'hi' ? 'आइटम' : 'items'}
+          </Text>
+        )}
+      </View>
+
       {subcategories.length > 0 ? (
         <View style={styles.mainContent}>
           <View style={styles.subcategoryColumn}>
@@ -480,14 +537,29 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
               ListEmptyComponent={
                 <View style={styles.emptyState}>
                   <View style={styles.emptyIconBox}>
-                    <Ionicons name="basket-outline" size={48} color="#a855f7" />
+                    <Ionicons name={searchQuery ? "search-outline" : "basket-outline"} size={48} color="#a855f7" />
                   </View>
                   <Text style={styles.emptyTitle}>
-                    {language === 'mr' ? 'कोणतीही उत्पादने आढळली नाहीत' : language === 'hi' ? 'कोई उत्पाद नहीं मिला' : 'No products found'}
+                    {searchQuery
+                      ? (language === 'mr' ? `"${searchQuery}" साठी काहीही आढळले नाही` : language === 'hi' ? `"${searchQuery}" के लिए कुछ नहीं मिला` : `No results for "${searchQuery}"`)
+                      : (language === 'mr' ? 'कोणतीही उत्पादने आढळली नाहीत' : language === 'hi' ? 'कोई उत्पाद नहीं मिला' : 'No products found')}
                   </Text>
                   <Text style={styles.emptySubText}>
-                    {language === 'mr' ? 'या श्रेणीत कोणतीही उत्पादने उपलब्ध नाहीत.' : language === 'hi' ? 'इस श्रेणी में कोई उत्पाद उपलब्ध नहीं है।' : 'No items are available in this category right now.'}
+                    {searchQuery
+                      ? (language === 'mr' ? 'कृपया शब्दलेखन तपासा किंवा वेगळा शब्द शोधा.' : language === 'hi' ? 'कृपया वर्तनी जांचें या कोई अन्य शब्द खोजें।' : 'Check your spelling or try another keyword.')
+                      : (language === 'mr' ? 'या श्रेणीत कोणतीही उत्पादने उपलब्ध नाहीत.' : language === 'hi' ? 'इस श्रेणी में कोई उत्पाद उपलब्ध नहीं है।' : 'No items are available in this category right now.')}
                   </Text>
+                  {searchQuery ? (
+                    <TouchableOpacity
+                      style={styles.clearSearchEmptyBtn}
+                      onPress={() => setSearchQuery('')}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={styles.clearSearchEmptyBtnText}>
+                        {language === 'mr' ? 'शोध साफ करा' : language === 'hi' ? 'सर्च हटाएं' : 'Clear Search'}
+                      </Text>
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
               }
             />
@@ -512,14 +584,29 @@ export default function CategoryProductsScreen({ navigation, route }: Props) {
           ListEmptyComponent={
             <View style={styles.emptyState}>
               <View style={styles.emptyIconBox}>
-                <Ionicons name="basket-outline" size={48} color="#a855f7" />
+                <Ionicons name={searchQuery ? "search-outline" : "basket-outline"} size={48} color="#a855f7" />
               </View>
               <Text style={styles.emptyTitle}>
-                {language === 'mr' ? 'कोणतीही उत्पादने आढळली नाहीत' : language === 'hi' ? 'कोई उत्पाद नहीं मिला' : 'No products found'}
+                {searchQuery
+                  ? (language === 'mr' ? `"${searchQuery}" साठी काहीही आढळले नाही` : language === 'hi' ? `"${searchQuery}" के लिए कुछ नहीं मिला` : `No results for "${searchQuery}"`)
+                  : (language === 'mr' ? 'कोणतीही उत्पादने आढळली नाहीत' : language === 'hi' ? 'कोई उत्पाद नहीं मिला' : 'No products found')}
               </Text>
               <Text style={styles.emptySubText}>
-                {language === 'mr' ? 'या श्रेणीत कोणतीही उत्पादने उपलब्ध नाहीत.' : language === 'hi' ? 'इस श्रेणी में कोई उत्पाद उपलब्ध नहीं है।' : 'No items are available in this category right now.'}
+                {searchQuery
+                  ? (language === 'mr' ? 'कृपया शब्दलेखन तपासा किंवा वेगळा शब्द शोधा.' : language === 'hi' ? 'कृपया वर्तनी जांचें या कोई अन्य शब्द खोजें।' : 'Check your spelling or try another keyword.')
+                  : (language === 'mr' ? 'या श्रेणीत कोणतीही उत्पादने उपलब्ध नाहीत.' : language === 'hi' ? 'इस श्रेणी में कोई उत्पाद उपलब्ध नहीं है।' : 'No items are available in this category right now.')}
               </Text>
+              {searchQuery ? (
+                <TouchableOpacity
+                  style={styles.clearSearchEmptyBtn}
+                  onPress={() => setSearchQuery('')}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.clearSearchEmptyBtnText}>
+                    {language === 'mr' ? 'शोध साफ करा' : language === 'hi' ? 'सर्च हटाएं' : 'Clear Search'}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           }
         />
@@ -796,4 +883,58 @@ const styles = StyleSheet.create({
   emptySubText: { color: '#64748b', fontSize: 13, textAlign: 'center', lineHeight: 20 },
   emptyText: { color: '#64748b', fontSize: 16, marginTop: 12, textAlign: 'center' },
 
+  searchHeader: {
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  searchBar: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8fafc',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    paddingHorizontal: 10,
+    height: 40,
+  },
+  searchIcon: {
+    marginRight: 6,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 13,
+    color: '#0f172a',
+    paddingVertical: 0,
+    height: '100%',
+  },
+  clearSearchBtn: {
+    padding: 4,
+  },
+  searchResultCount: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#a855f7',
+    paddingHorizontal: 4,
+  },
+  clearSearchEmptyBtn: {
+    marginTop: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: '#f3e8ff',
+    borderWidth: 1,
+    borderColor: '#d8b4fe',
+  },
+  clearSearchEmptyBtnText: {
+    color: '#7c3aed',
+    fontSize: 12,
+    fontWeight: '700',
+  },
 });
